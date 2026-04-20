@@ -7,8 +7,10 @@ default-run = "revive"
 [dependencies]
 revive-core = { path = "../revive-core" }
 revive-cheat = { path = "../revive-cheat" }
+egui = "0.31"
+egui_sdl2_gl = "0.31"
 rfd = "0.15"
-sdl2 = { version = "0.36", features = ["bundled", "static-link"] }
+sdl2 = { version = "0.37", features = ["bundled", "static-link"] }
 
 [[bin]]
 name = "revive"

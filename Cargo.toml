@@ -7,6 +7,31 @@ members = [
 default-members = ["crates/revive-cli"]
 resolver = "2"
 
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package.emulator-core]
+opt-level = 3
+
+[profile.dev.package.emulator-gb]
+opt-level = 3
+
+[profile.dev.package.emulator-gba]
+opt-level = 3
+
+[profile.dev.package.megadrive-core]
+opt-level = 3
+
+[profile.dev.package.nes-emulator]
+opt-level = 3
+
+[profile.dev.package.pce-core]
+opt-level = 3
+
+[profile.dev.package.snes-core]
+opt-level = 3
+
 [profile.release]
+opt-level = 3
 lto = "thin"
 codegen-units = 1

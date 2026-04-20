@@ -1,2 +1,12 @@
 [env]
 CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+
+[alias]
+build-apple = "build --release --target aarch64-apple-darwin"
+run-apple = "run --release --target aarch64-apple-darwin"
+
+[target.aarch64-apple-darwin]
+rustflags = [
+    "-C",
+    "target-cpu=native",
+]

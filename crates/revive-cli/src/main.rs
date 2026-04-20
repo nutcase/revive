@@ -3,16 +3,59 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+mod cheat_panel;
+mod gl_game;
+
+use cheat_panel::{CheatPanel, MemorySnapshot};
+use egui_sdl2_gl::gl;
+use egui_sdl2_gl::{DpiScaling, ShaderVersion};
+use gl_game::GlGameRenderer;
 use revive_cheat::CheatManager;
-use revive_core::{CoreInstance, FrameView, SystemKind, VirtualButton};
+use revive_core::{CoreInstance, SystemKind, VirtualButton};
 use sdl2::audio::{AudioQueue, AudioSpecDesired};
-use sdl2::event::Event;
-use sdl2::keyboard::{Keycode, Mod};
-use sdl2::pixels::{Color, PixelFormatEnum};
-use sdl2::render::{Canvas, Texture};
-use sdl2::video::Window;
+use sdl2::event::{Event, WindowEvent};
+use sdl2::keyboard::{KeyboardState, Keycode, Mod, Scancode};
+use sdl2::video::{GLProfile, SwapInterval, Window};
 
 const DEFAULT_SCALE: u32 = 3;
+const PANEL_WIDTH_DEFAULT: f32 = 420.0;
+const PANEL_WIDTH_MIN: f32 = 300.0;
+const INPUT_BUTTONS: [VirtualButton; 15] = [
+    VirtualButton::Up,
+    VirtualButton::Down,
+    VirtualButton::Left,
+    VirtualButton::Right,
+    VirtualButton::A,
+    VirtualButton::B,
+    VirtualButton::X,
+    VirtualButton::Y,
+    VirtualButton::L,
+    VirtualButton::R,
+    VirtualButton::Start,
+    VirtualButton::Select,
+    VirtualButton::C,
+    VirtualButton::Z,
+    VirtualButton::Mode,
+];
+
+#[derive(Debug, Default)]
+struct InputState {
+    pressed: [bool; INPUT_BUTTONS.len()],
+}
+
+impl InputState {
+    fn set(&mut self, button: VirtualButton, pressed: bool) {
+        self.pressed[button_index(button)] = pressed;
+    }
+
+    fn is_pressed(&self, button: VirtualButton) -> bool {
+        self.pressed[button_index(button)]
+    }
+
+    fn clear(&mut self) {
+        self.pressed.fill(false);
+    }
+}
 
 #[derive(Debug)]
 struct Options {
@@ -38,14 +81,24 @@ fn run() -> Result<(), Box<dyn Error>> {
     };
 
     let core = CoreInstance::load_rom(&rom_path, options.system)?;
-    let cheats = load_cheats(options.cheat_path.as_deref())?;
+    let system = core.system();
+    let (cheat_path, legacy_cheat_path) = match &options.cheat_path {
+        Some(path) => (path.clone(), None),
+        None => (
+            default_cheat_path(system, &rom_path),
+            Some(legacy_cheat_path(&rom_path)),
+        ),
+    };
+    let cheats = load_cheats(
+        &cheat_path,
+        options.cheat_path.is_some(),
+        legacy_cheat_path.as_deref(),
+    )?;
 
     println!("Loaded      : {}", rom_path.display());
     println!("System      : {}", core.system().label());
     println!("Title       : {}", core.title());
-    if let Some(path) = &options.cheat_path {
-        println!("Cheats      : {}", path.display());
-    }
+    println!("Cheats      : {}", cheat_path.display());
     for region in core.memory_regions() {
         println!(
             "Memory      : {} ({}, {} bytes)",
@@ -53,8 +106,10 @@ fn run() -> Result<(), Box<dyn Error>> {
         );
     }
     println!("State keys  : Ctrl/Cmd+0..9 save, 0..9 load");
+    println!("Controls    : arrows move, Enter start, Shift/Backspace select");
+    println!("Cheat panel : Tab toggle");
 
-    run_sdl_loop(core, cheats, &options)?;
+    run_sdl_loop(core, cheats, &cheat_path, &options)?;
     Ok(())
 }
 
@@ -154,21 +209,67 @@ fn select_rom_path() -> Option<PathBuf> {
         .pick_file()
 }
 
-fn load_cheats(path: Option<&Path>) -> Result<Option<CheatManager>, Box<dyn Error>> {
-    let Some(path) = path else {
-        return Ok(None);
-    };
-    if !path.exists() {
+fn default_cheat_path(system: SystemKind, rom_path: &Path) -> PathBuf {
+    PathBuf::from("cheats")
+        .join(system_dir(system))
+        .join(rom_file_stem(rom_path))
+        .join("cheats.json")
+}
+
+fn legacy_cheat_path(rom_path: &Path) -> PathBuf {
+    PathBuf::from("cheats").join(format!("{}.json", rom_file_stem(rom_path)))
+}
+
+fn rom_file_stem(rom_path: &Path) -> String {
+    rom_path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("game")
+        .to_string()
+}
+
+fn system_dir(system: SystemKind) -> &'static str {
+    match system {
+        SystemKind::Nes => "nes",
+        SystemKind::Snes => "snes",
+        SystemKind::MegaDrive => "megadrive",
+        SystemKind::Pce => "pce",
+        SystemKind::GameBoy => "gb",
+        SystemKind::GameBoyColor => "gbc",
+        SystemKind::GameBoyAdvance => "gba",
+    }
+}
+
+fn load_cheats(
+    path: &Path,
+    required: bool,
+    legacy_path: Option<&Path>,
+) -> Result<CheatManager, Box<dyn Error>> {
+    if path.exists() {
+        let manager = CheatManager::load_from_file(path)?;
+        println!("Loaded cheats: {}", manager.entries.len());
+        return Ok(manager);
+    }
+    if let Some(legacy_path) = legacy_path.filter(|legacy_path| legacy_path.exists()) {
+        let manager = CheatManager::load_from_file(legacy_path)?;
+        println!(
+            "Loaded legacy cheats: {} ({})",
+            manager.entries.len(),
+            legacy_path.display()
+        );
+        return Ok(manager);
+    }
+    if required {
         return Err(format!("cheat file does not exist: {}", path.display()).into());
     }
-    let manager = CheatManager::load_from_file(path)?;
-    println!("Loaded cheats: {}", manager.entries.len());
-    Ok(Some(manager))
+    Ok(CheatManager::new())
 }
 
 fn run_sdl_loop(
     mut core: CoreInstance,
-    cheats: Option<CheatManager>,
+    mut cheats: CheatManager,
+    cheat_path: &Path,
     options: &Options,
 ) -> Result<(), Box<dyn Error>> {
     sdl2::hint::set("SDL_DISABLE_IMMINTRIN_H", "1");
@@ -176,33 +277,46 @@ fn run_sdl_loop(
 
     let sdl = sdl2::init().map_err(sdl_error)?;
     let video = sdl.video().map_err(sdl_error)?;
+    let gl_attr = video.gl_attr();
+    gl_attr.set_context_profile(GLProfile::Core);
+    gl_attr.set_context_version(3, 2);
+    gl_attr.set_double_buffer(true);
+    gl_attr.set_multisample_samples(0);
 
     let (frame_width, frame_height) = {
         let frame = core.frame();
         (frame.width, frame.height)
     };
+    let mut game_w = frame_width as u32 * DEFAULT_SCALE;
+    let mut game_h = frame_height as u32 * DEFAULT_SCALE;
 
     let window_title = format!("Revive - {} - {}", core.system().label(), core.title());
-    let window = video
-        .window(
-            &window_title,
-            frame_width as u32 * DEFAULT_SCALE,
-            frame_height as u32 * DEFAULT_SCALE,
-        )
+    let mut window = video
+        .window(&window_title, game_w, game_h)
         .position_centered()
         .resizable()
+        .opengl()
         .build()
         .map_err(|err| io::Error::other(err.to_string()))?;
 
-    let mut canvas = build_canvas(window)?;
-    let texture_creator = canvas.texture_creator();
-    let mut texture = texture_creator
-        .create_texture_streaming(
-            PixelFormatEnum::RGB24,
-            frame_width as u32,
-            frame_height as u32,
-        )
+    let gl_context = window
+        .gl_create_context()
         .map_err(|err| io::Error::other(err.to_string()))?;
+    window
+        .gl_make_current(&gl_context)
+        .map_err(|err| io::Error::other(err.to_string()))?;
+    gl::load_with(|name| video.gl_get_proc_address(name) as *const _);
+    let _ = video.gl_set_swap_interval(SwapInterval::Immediate);
+
+    bring_window_to_front(&mut window);
+    let (mut painter, mut egui_state) =
+        egui_sdl2_gl::with_sdl2(&window, ShaderVersion::Default, DpiScaling::Default);
+    let egui_ctx = egui::Context::default();
+    let text_input = video.text_input();
+    let mut text_input_active = false;
+    text_input.stop();
+
+    let mut game_renderer = GlGameRenderer::new();
     let mut texture_size = (frame_width, frame_height);
 
     let audio_queue = if options.no_audio {
@@ -214,11 +328,64 @@ fn run_sdl_loop(
     let mut audio_scratch = Vec::new();
     let mut event_pump = sdl.event_pump().map_err(sdl_error)?;
     let mut frame_clock = FrameClock::new(core.system());
+    let mut input_state = InputState::default();
+    let mut cheat_panel = CheatPanel::new();
+    let mut prev_panel_visible = cheat_panel.is_visible();
+    let mut panel_width_px = PANEL_WIDTH_DEFAULT as u32;
+    let input_debug = std::env::var_os("REVIVE_INPUT_DEBUG").is_some();
+    let mut front_retry_frames = 12u8;
 
     'running: loop {
+        let should_enable_text_input = cheat_panel.is_visible();
+        if should_enable_text_input != text_input_active {
+            if should_enable_text_input {
+                text_input.start();
+            } else {
+                text_input.stop();
+            }
+            text_input_active = should_enable_text_input;
+        }
+        egui_state.input.time = Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs_f64(),
+        );
+
         for event in event_pump.poll_iter() {
-            match event {
+            if cheat_panel.is_visible() {
+                if let Some(filtered) = filter_event_for_ascii_text_input(&event) {
+                    egui_state.process_input(&window, filtered, &mut painter);
+                }
+            }
+
+            match &event {
                 Event::Quit { .. } => break 'running,
+                Event::Window {
+                    win_event: WindowEvent::FocusGained,
+                    ..
+                } => {
+                    if input_debug {
+                        eprintln!("input: focus gained");
+                    }
+                }
+                Event::Window {
+                    win_event: WindowEvent::FocusLost,
+                    ..
+                } => {
+                    if input_debug {
+                        eprintln!("input: focus lost");
+                    }
+                    input_state.clear();
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    repeat: false,
+                    ..
+                } if cheat_panel.is_visible() => {
+                    cheat_panel.hide();
+                    continue;
+                }
                 Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
@@ -229,11 +396,26 @@ fn run_sdl_loop(
                     repeat: false,
                     ..
                 } => {
+                    let key = *key;
+                    let keymod = *keymod;
+                    if key == Keycode::Tab {
+                        let live_memory = MemorySnapshot::capture(&core);
+                        cheat_panel.toggle(&live_memory);
+                        continue;
+                    }
+                    if cheat_panel.is_visible() && egui_ctx.wants_keyboard_input() {
+                        continue;
+                    }
                     if handle_state_key(&mut core, key, keymod) {
                         continue;
                     }
-                    if let Some(button) = map_key(core.system(), key) {
-                        core.set_button(1, button, true);
+                    if let Some(button) = keycode_button(core.system(), key) {
+                        if input_debug {
+                            eprintln!("input: key down {key:?} -> {}", button_label(button));
+                        }
+                        input_state.set(button, true);
+                    } else if input_debug {
+                        eprintln!("input: key down {key:?}");
                     }
                 }
                 Event::KeyUp {
@@ -241,38 +423,131 @@ fn run_sdl_loop(
                     repeat: false,
                     ..
                 } => {
-                    if let Some(button) = map_key(core.system(), key) {
-                        core.set_button(1, button, false);
+                    let key = *key;
+                    if cheat_panel.is_visible() {
+                        continue;
+                    }
+                    if let Some(button) = keycode_button(core.system(), key) {
+                        if input_debug {
+                            eprintln!("input: key up {key:?} -> {}", button_label(button));
+                        }
+                        input_state.set(button, false);
+                    } else if input_debug {
+                        eprintln!("input: key up {key:?}");
                     }
                 }
                 _ => {}
             }
         }
 
-        apply_cheats(&mut core, cheats.as_ref());
-        core.step_frame()?;
-        apply_cheats(&mut core, cheats.as_ref());
+        if cheat_panel.is_visible() != prev_panel_visible {
+            let new_w = if cheat_panel.is_visible() {
+                game_w + panel_width_px
+            } else {
+                game_w
+            };
+            let _ = window.set_size(new_w, game_h);
+            prev_panel_visible = cheat_panel.is_visible();
+        }
+
+        if cheat_panel.is_visible() {
+            input_state.clear();
+            release_keyboard_input(&mut core);
+        } else {
+            sync_keyboard_input(&mut core, &event_pump, &input_state);
+        }
+        apply_cheats(&mut core, &cheats);
+        if !cheat_panel.is_paused() {
+            core.step_frame()?;
+        }
+        apply_cheats(&mut core, &cheats);
 
         if let Some(queue) = audio_queue.as_mut() {
             feed_audio(queue, &mut core, &mut audio_scratch)?;
         }
 
-        let frame = core.frame();
-        if (frame.width, frame.height) != texture_size {
-            texture = texture_creator
-                .create_texture_streaming(
-                    PixelFormatEnum::RGB24,
-                    frame.width as u32,
-                    frame.height as u32,
-                )
-                .map_err(|err| io::Error::other(err.to_string()))?;
-            texture_size = (frame.width, frame.height);
-            let _ = canvas.window_mut().set_size(
-                frame.width as u32 * DEFAULT_SCALE,
-                frame.height as u32 * DEFAULT_SCALE,
-            );
+        let live_memory = MemorySnapshot::capture(&core);
+        {
+            let frame = core.frame();
+            if (frame.width, frame.height) != texture_size {
+                texture_size = (frame.width, frame.height);
+                game_w = frame.width as u32 * DEFAULT_SCALE;
+                game_h = frame.height as u32 * DEFAULT_SCALE;
+                let new_w = if cheat_panel.is_visible() {
+                    game_w + panel_width_px
+                } else {
+                    game_w
+                };
+                let _ = window.set_size(new_w, game_h);
+            }
+            game_renderer.upload_rgb24_frame(frame.data, frame.width, frame.height);
         }
-        present_frame(&mut canvas, &mut texture, frame)?;
+
+        let (win_w, win_h) = window.size();
+        unsafe {
+            gl::ClearColor(0.0, 0.0, 0.0, 1.0);
+            gl::Clear(gl::COLOR_BUFFER_BIT);
+        }
+        let panel_px = if cheat_panel.is_visible() {
+            panel_width_px
+        } else {
+            0
+        };
+        let game_vp_w = win_w.saturating_sub(panel_px);
+        game_renderer.draw(0, 0, game_vp_w as i32, win_h as i32);
+
+        if cheat_panel.is_visible() {
+            unsafe {
+                gl::Viewport(0, 0, win_w as i32, win_h as i32);
+                gl::Enable(gl::BLEND);
+                gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+                gl::Enable(gl::SCISSOR_TEST);
+            }
+            painter.update_screen_rect((win_w, win_h));
+            egui_state.input.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(win_w as f32, win_h as f32),
+            ));
+
+            let mut pending_writes = Vec::new();
+            let full_output = egui_ctx.run(egui_state.input.take(), |ctx| {
+                let panel_resp = egui::SidePanel::right("cheat_panel")
+                    .resizable(true)
+                    .min_width(PANEL_WIDTH_MIN)
+                    .default_width(PANEL_WIDTH_DEFAULT)
+                    .show(ctx, |ui| {
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                pending_writes = cheat_panel.show_panel(
+                                    ui,
+                                    &live_memory,
+                                    &mut cheats,
+                                    Some(cheat_path),
+                                );
+                            });
+                    });
+                let actual_w = panel_resp.response.rect.width() as u32;
+                if actual_w != panel_width_px {
+                    panel_width_px = actual_w;
+                    let _ = window.set_size(game_w + panel_width_px, game_h);
+                }
+            });
+
+            let prims = egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
+            painter.paint_jobs(None, full_output.textures_delta, prims);
+            egui_state.process_output(&window, &full_output.platform_output);
+
+            for write in pending_writes {
+                core.write_memory_byte(&write.region, write.offset, write.value);
+            }
+        }
+
+        window.gl_swap_window();
+        if front_retry_frames > 0 {
+            bring_window_to_front(&mut window);
+            front_retry_frames -= 1;
+        }
         frame_clock.wait();
     }
 
@@ -283,15 +558,19 @@ fn run_sdl_loop(
     Ok(())
 }
 
-fn build_canvas(window: Window) -> Result<Canvas<Window>, Box<dyn Error>> {
-    match window.into_canvas().accelerated().present_vsync().build() {
-        Ok(mut canvas) => {
-            canvas.set_draw_color(Color::RGB(0, 0, 0));
-            Ok(canvas)
-        }
-        Err(err) => Err(io::Error::other(err.to_string()).into()),
-    }
+fn bring_window_to_front(window: &mut Window) {
+    window.show();
+    window.raise();
+    platform_bring_window_to_front(window);
 }
+
+#[cfg(target_os = "macos")]
+fn platform_bring_window_to_front(window: &Window) {
+    macos_frontmost::activate_window(window);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn platform_bring_window_to_front(_window: &Window) {}
 
 fn open_audio_queue(
     sdl: &sdl2::Sdl,
@@ -326,49 +605,18 @@ fn feed_audio(
     let channels = usize::from(spec.channels.max(1));
     let queued_i16 = queue.size() as usize / std::mem::size_of::<i16>();
     let queued_frames = queued_i16 / channels;
-    let target_frames = ((spec.freq.max(8_000) as usize) / 10).clamp(1024, 8192);
+    let target_frames = ((spec.freq.max(8_000) as usize) / 30).clamp(512, 2048);
 
-    if queued_frames < target_frames {
-        core.drain_audio_i16(scratch);
-        if !scratch.is_empty() {
-            queue
-                .queue_audio(scratch)
-                .map_err(|err| io::Error::other(err.to_string()))?;
-        }
+    core.drain_audio_i16(scratch);
+    if queued_frames < target_frames && !scratch.is_empty() {
+        queue
+            .queue_audio(scratch)
+            .map_err(|err| io::Error::other(err.to_string()))?;
     }
     Ok(())
 }
 
-fn present_frame(
-    canvas: &mut Canvas<Window>,
-    texture: &mut Texture<'_>,
-    frame: FrameView<'_>,
-) -> Result<(), Box<dyn Error>> {
-    let row_bytes = frame.width * 3;
-    texture
-        .with_lock(None, |target: &mut [u8], pitch: usize| {
-            for row in 0..frame.height {
-                let src_start = row * row_bytes;
-                let dst_start = row * pitch;
-                let src = &frame.data[src_start..src_start + row_bytes];
-                let dst = &mut target[dst_start..dst_start + row_bytes];
-                dst.copy_from_slice(src);
-            }
-        })
-        .map_err(|err| io::Error::other(err.to_string()))?;
-
-    canvas.clear();
-    canvas
-        .copy(texture, None, None)
-        .map_err(|err| io::Error::other(err.to_string()))?;
-    canvas.present();
-    Ok(())
-}
-
-fn apply_cheats(core: &mut CoreInstance, cheats: Option<&CheatManager>) {
-    let Some(cheats) = cheats else {
-        return;
-    };
+fn apply_cheats(core: &mut CoreInstance, cheats: &CheatManager) {
     for entry in cheats.enabled_entries() {
         core.write_memory_byte(&entry.region, entry.offset as usize, entry.value);
     }
@@ -412,32 +660,54 @@ fn state_save_modifier(keymod: Mod) -> bool {
     keymod.intersects(Mod::LCTRLMOD | Mod::RCTRLMOD | Mod::LGUIMOD | Mod::RGUIMOD)
 }
 
-fn map_key(system: SystemKind, key: Keycode) -> Option<VirtualButton> {
-    match system {
-        SystemKind::Nes => map_nes_key(key),
-        SystemKind::Snes => map_snes_key(key),
-        SystemKind::MegaDrive => map_megadrive_key(key),
-        SystemKind::Pce => map_pce_key(key),
-        SystemKind::GameBoy | SystemKind::GameBoyColor => map_gameboy_key(key),
-        SystemKind::GameBoyAdvance => map_gameboy_advance_key(key),
+fn sync_keyboard_input(
+    core: &mut CoreInstance,
+    event_pump: &sdl2::EventPump,
+    event_input: &InputState,
+) {
+    let system = core.system();
+    let keyboard = event_pump.keyboard_state();
+    for button in INPUT_BUTTONS {
+        core.set_button(
+            1,
+            button,
+            event_input.is_pressed(button) || button_pressed(system, &keyboard, button),
+        );
     }
 }
 
-fn map_nes_key(key: Keycode) -> Option<VirtualButton> {
+fn release_keyboard_input(core: &mut CoreInstance) {
+    for button in INPUT_BUTTONS {
+        core.set_button(1, button, false);
+    }
+}
+
+fn keycode_button(system: SystemKind, key: Keycode) -> Option<VirtualButton> {
+    match system {
+        SystemKind::Nes => nes_keycode_button(key),
+        SystemKind::Snes => snes_keycode_button(key),
+        SystemKind::MegaDrive => megadrive_keycode_button(key),
+        SystemKind::Pce => pce_keycode_button(key),
+        SystemKind::GameBoy | SystemKind::GameBoyColor => gameboy_keycode_button(key),
+        SystemKind::GameBoyAdvance => gameboy_advance_keycode_button(key),
+    }
+}
+
+fn nes_keycode_button(key: Keycode) -> Option<VirtualButton> {
     match key {
         Keycode::Up => Some(VirtualButton::Up),
         Keycode::Down => Some(VirtualButton::Down),
         Keycode::Left => Some(VirtualButton::Left),
         Keycode::Right => Some(VirtualButton::Right),
-        Keycode::Z => Some(VirtualButton::A),
-        Keycode::X => Some(VirtualButton::B),
-        Keycode::Return => Some(VirtualButton::Start),
-        Keycode::Space | Keycode::RShift | Keycode::LShift => Some(VirtualButton::Select),
+        Keycode::Z | Keycode::J => Some(VirtualButton::A),
+        Keycode::X | Keycode::K => Some(VirtualButton::B),
+        Keycode::Return | Keycode::Space => Some(VirtualButton::Start),
+        Keycode::Backspace | Keycode::RShift | Keycode::LShift => Some(VirtualButton::Select),
         _ => None,
     }
 }
 
-fn map_snes_key(key: Keycode) -> Option<VirtualButton> {
+fn snes_keycode_button(key: Keycode) -> Option<VirtualButton> {
     match key {
         Keycode::Up => Some(VirtualButton::Up),
         Keycode::Down => Some(VirtualButton::Down),
@@ -450,12 +720,12 @@ fn map_snes_key(key: Keycode) -> Option<VirtualButton> {
         Keycode::E => Some(VirtualButton::L),
         Keycode::Q => Some(VirtualButton::R),
         Keycode::Return | Keycode::Space => Some(VirtualButton::Start),
-        Keycode::RShift | Keycode::LShift => Some(VirtualButton::Select),
+        Keycode::Backspace | Keycode::RShift | Keycode::LShift => Some(VirtualButton::Select),
         _ => None,
     }
 }
 
-fn map_megadrive_key(key: Keycode) -> Option<VirtualButton> {
+fn megadrive_keycode_button(key: Keycode) -> Option<VirtualButton> {
     match key {
         Keycode::Up => Some(VirtualButton::Up),
         Keycode::Down => Some(VirtualButton::Down),
@@ -473,39 +743,194 @@ fn map_megadrive_key(key: Keycode) -> Option<VirtualButton> {
     }
 }
 
-fn map_pce_key(key: Keycode) -> Option<VirtualButton> {
+fn pce_keycode_button(key: Keycode) -> Option<VirtualButton> {
     match key {
         Keycode::Up => Some(VirtualButton::Up),
         Keycode::Down => Some(VirtualButton::Down),
         Keycode::Left => Some(VirtualButton::Left),
         Keycode::Right => Some(VirtualButton::Right),
-        Keycode::Z => Some(VirtualButton::A),
-        Keycode::X => Some(VirtualButton::B),
-        Keycode::Return | Keycode::Space => Some(VirtualButton::Start),
-        Keycode::RShift | Keycode::LShift => Some(VirtualButton::Select),
-        _ => None,
-    }
-}
-
-fn map_gameboy_key(key: Keycode) -> Option<VirtualButton> {
-    match key {
-        Keycode::Up => Some(VirtualButton::Up),
-        Keycode::Down => Some(VirtualButton::Down),
-        Keycode::Left => Some(VirtualButton::Left),
-        Keycode::Right => Some(VirtualButton::Right),
-        Keycode::X => Some(VirtualButton::A),
-        Keycode::Z => Some(VirtualButton::B),
+        Keycode::Z | Keycode::J => Some(VirtualButton::A),
+        Keycode::X | Keycode::K => Some(VirtualButton::B),
         Keycode::Return | Keycode::Space => Some(VirtualButton::Start),
         Keycode::Backspace | Keycode::RShift | Keycode::LShift => Some(VirtualButton::Select),
         _ => None,
     }
 }
 
-fn map_gameboy_advance_key(key: Keycode) -> Option<VirtualButton> {
+fn gameboy_keycode_button(key: Keycode) -> Option<VirtualButton> {
+    match key {
+        Keycode::Up => Some(VirtualButton::Up),
+        Keycode::Down => Some(VirtualButton::Down),
+        Keycode::Left => Some(VirtualButton::Left),
+        Keycode::Right => Some(VirtualButton::Right),
+        Keycode::X | Keycode::J => Some(VirtualButton::A),
+        Keycode::Z | Keycode::K => Some(VirtualButton::B),
+        Keycode::Return | Keycode::Space => Some(VirtualButton::Start),
+        Keycode::Backspace | Keycode::RShift | Keycode::LShift => Some(VirtualButton::Select),
+        _ => None,
+    }
+}
+
+fn gameboy_advance_keycode_button(key: Keycode) -> Option<VirtualButton> {
     match key {
         Keycode::A => Some(VirtualButton::L),
         Keycode::S => Some(VirtualButton::R),
-        _ => map_gameboy_key(key),
+        _ => gameboy_keycode_button(key),
+    }
+}
+
+fn button_pressed(system: SystemKind, keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
+    match system {
+        SystemKind::Nes => nes_button_pressed(keyboard, button),
+        SystemKind::Snes => snes_button_pressed(keyboard, button),
+        SystemKind::MegaDrive => megadrive_button_pressed(keyboard, button),
+        SystemKind::Pce => pce_button_pressed(keyboard, button),
+        SystemKind::GameBoy | SystemKind::GameBoyColor => gameboy_button_pressed(keyboard, button),
+        SystemKind::GameBoyAdvance => gameboy_advance_button_pressed(keyboard, button),
+    }
+}
+
+fn nes_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
+    match button {
+        VirtualButton::Up => scancode_down(keyboard, &[Scancode::Up]),
+        VirtualButton::Down => scancode_down(keyboard, &[Scancode::Down]),
+        VirtualButton::Left => scancode_down(keyboard, &[Scancode::Left]),
+        VirtualButton::Right => scancode_down(keyboard, &[Scancode::Right]),
+        VirtualButton::A => scancode_down(keyboard, &[Scancode::Z, Scancode::J]),
+        VirtualButton::B => scancode_down(keyboard, &[Scancode::X, Scancode::K]),
+        VirtualButton::Start => scancode_down(keyboard, &[Scancode::Return, Scancode::Space]),
+        VirtualButton::Select => scancode_down(
+            keyboard,
+            &[Scancode::Backspace, Scancode::LShift, Scancode::RShift],
+        ),
+        _ => false,
+    }
+}
+
+fn snes_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
+    match button {
+        VirtualButton::Up => scancode_down(keyboard, &[Scancode::Up]),
+        VirtualButton::Down => scancode_down(keyboard, &[Scancode::Down]),
+        VirtualButton::Left => scancode_down(keyboard, &[Scancode::Left]),
+        VirtualButton::Right => scancode_down(keyboard, &[Scancode::Right]),
+        VirtualButton::A => scancode_down(keyboard, &[Scancode::D]),
+        VirtualButton::B => scancode_down(keyboard, &[Scancode::S]),
+        VirtualButton::X => scancode_down(keyboard, &[Scancode::W]),
+        VirtualButton::Y => scancode_down(keyboard, &[Scancode::A]),
+        VirtualButton::L => scancode_down(keyboard, &[Scancode::E]),
+        VirtualButton::R => scancode_down(keyboard, &[Scancode::Q]),
+        VirtualButton::Start => scancode_down(keyboard, &[Scancode::Return, Scancode::Space]),
+        VirtualButton::Select => scancode_down(
+            keyboard,
+            &[Scancode::Backspace, Scancode::LShift, Scancode::RShift],
+        ),
+        _ => false,
+    }
+}
+
+fn megadrive_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
+    match button {
+        VirtualButton::Up => scancode_down(keyboard, &[Scancode::Up]),
+        VirtualButton::Down => scancode_down(keyboard, &[Scancode::Down]),
+        VirtualButton::Left => scancode_down(keyboard, &[Scancode::Left]),
+        VirtualButton::Right => scancode_down(keyboard, &[Scancode::Right]),
+        VirtualButton::A => scancode_down(keyboard, &[Scancode::A]),
+        VirtualButton::B => scancode_down(keyboard, &[Scancode::Z]),
+        VirtualButton::C => scancode_down(keyboard, &[Scancode::X]),
+        VirtualButton::X => scancode_down(keyboard, &[Scancode::S]),
+        VirtualButton::Y => scancode_down(keyboard, &[Scancode::D]),
+        VirtualButton::Z => scancode_down(keyboard, &[Scancode::F]),
+        VirtualButton::Mode => scancode_down(keyboard, &[Scancode::Q]),
+        VirtualButton::Start => scancode_down(keyboard, &[Scancode::Return, Scancode::Space]),
+        _ => false,
+    }
+}
+
+fn pce_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
+    match button {
+        VirtualButton::Up => scancode_down(keyboard, &[Scancode::Up]),
+        VirtualButton::Down => scancode_down(keyboard, &[Scancode::Down]),
+        VirtualButton::Left => scancode_down(keyboard, &[Scancode::Left]),
+        VirtualButton::Right => scancode_down(keyboard, &[Scancode::Right]),
+        VirtualButton::A => scancode_down(keyboard, &[Scancode::Z, Scancode::J]),
+        VirtualButton::B => scancode_down(keyboard, &[Scancode::X, Scancode::K]),
+        VirtualButton::Start => scancode_down(keyboard, &[Scancode::Return, Scancode::Space]),
+        VirtualButton::Select => scancode_down(
+            keyboard,
+            &[Scancode::Backspace, Scancode::LShift, Scancode::RShift],
+        ),
+        _ => false,
+    }
+}
+
+fn gameboy_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
+    match button {
+        VirtualButton::Up => scancode_down(keyboard, &[Scancode::Up]),
+        VirtualButton::Down => scancode_down(keyboard, &[Scancode::Down]),
+        VirtualButton::Left => scancode_down(keyboard, &[Scancode::Left]),
+        VirtualButton::Right => scancode_down(keyboard, &[Scancode::Right]),
+        VirtualButton::A => scancode_down(keyboard, &[Scancode::X, Scancode::J]),
+        VirtualButton::B => scancode_down(keyboard, &[Scancode::Z, Scancode::K]),
+        VirtualButton::Start => scancode_down(keyboard, &[Scancode::Return, Scancode::Space]),
+        VirtualButton::Select => scancode_down(
+            keyboard,
+            &[Scancode::Backspace, Scancode::LShift, Scancode::RShift],
+        ),
+        _ => false,
+    }
+}
+
+fn gameboy_advance_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
+    match button {
+        VirtualButton::L => scancode_down(keyboard, &[Scancode::A]),
+        VirtualButton::R => scancode_down(keyboard, &[Scancode::S]),
+        _ => gameboy_button_pressed(keyboard, button),
+    }
+}
+
+fn scancode_down(keyboard: &KeyboardState<'_>, scancodes: &[Scancode]) -> bool {
+    scancodes
+        .iter()
+        .any(|scancode| keyboard.is_scancode_pressed(*scancode))
+}
+
+fn button_index(button: VirtualButton) -> usize {
+    match button {
+        VirtualButton::Up => 0,
+        VirtualButton::Down => 1,
+        VirtualButton::Left => 2,
+        VirtualButton::Right => 3,
+        VirtualButton::A => 4,
+        VirtualButton::B => 5,
+        VirtualButton::X => 6,
+        VirtualButton::Y => 7,
+        VirtualButton::L => 8,
+        VirtualButton::R => 9,
+        VirtualButton::Start => 10,
+        VirtualButton::Select => 11,
+        VirtualButton::C => 12,
+        VirtualButton::Z => 13,
+        VirtualButton::Mode => 14,
+    }
+}
+
+fn button_label(button: VirtualButton) -> &'static str {
+    match button {
+        VirtualButton::Up => "Up",
+        VirtualButton::Down => "Down",
+        VirtualButton::Left => "Left",
+        VirtualButton::Right => "Right",
+        VirtualButton::A => "A",
+        VirtualButton::B => "B",
+        VirtualButton::X => "X",
+        VirtualButton::Y => "Y",
+        VirtualButton::L => "L",
+        VirtualButton::R => "R",
+        VirtualButton::Start => "Start",
+        VirtualButton::Select => "Select",
+        VirtualButton::C => "C",
+        VirtualButton::Z => "Z",
+        VirtualButton::Mode => "Mode",
     }
 }
 
@@ -543,4 +968,178 @@ impl FrameClock {
 
 fn sdl_error(message: String) -> io::Error {
     io::Error::other(message)
+}
+
+fn filter_event_for_ascii_text_input(event: &Event) -> Option<Event> {
+    match event {
+        Event::TextEditing { .. } => None,
+        Event::TextInput {
+            timestamp,
+            window_id,
+            text,
+        } => {
+            let ascii_text: String = text.chars().filter(|ch| ch.is_ascii()).collect();
+            if ascii_text.is_empty() {
+                None
+            } else {
+                Some(Event::TextInput {
+                    timestamp: *timestamp,
+                    window_id: *window_id,
+                    text: ascii_text,
+                })
+            }
+        }
+        _ => Some(event.clone()),
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod macos_frontmost {
+    use std::ffi::{c_char, c_void, CString};
+
+    use sdl2::video::Window;
+
+    const SDL_SYSWM_COCOA: u32 = 4;
+    const NS_APPLICATION_ACTIVATION_POLICY_REGULAR: isize = 0;
+    const NS_APPLICATION_ACTIVATE_ALL_WINDOWS: usize = 1 << 0;
+    const NS_APPLICATION_ACTIVATE_IGNORING_OTHER_APPS: usize = 1 << 1;
+
+    #[repr(C)]
+    union SdlSysWmInfoData {
+        cocoa: CocoaInfo,
+        dummy: [u8; 64],
+        _align: [u64; 8],
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    struct CocoaInfo {
+        window: *mut c_void,
+    }
+
+    #[repr(C)]
+    struct SdlSysWmInfo {
+        version: sdl2::sys::SDL_version,
+        subsystem: u32,
+        info: SdlSysWmInfoData,
+    }
+
+    #[link(name = "objc")]
+    unsafe extern "C" {
+        fn SDL_GetWindowWMInfo(
+            window: *mut sdl2::sys::SDL_Window,
+            info: *mut SdlSysWmInfo,
+        ) -> sdl2::sys::SDL_bool;
+
+        fn objc_getClass(name: *const c_char) -> *mut c_void;
+        fn sel_registerName(name: *const c_char) -> *mut c_void;
+        fn objc_msgSend();
+    }
+
+    pub fn activate_window(window: &Window) {
+        let Some(ns_window) = ns_window(window) else {
+            return;
+        };
+        unsafe {
+            activate_application();
+            send_void_no_args(ns_window, sel("makeMainWindow"));
+            send_void_no_args(ns_window, sel("makeKeyWindow"));
+            send_void(
+                ns_window,
+                sel("makeKeyAndOrderFront:"),
+                std::ptr::null_mut(),
+            );
+            send_void_no_args(ns_window, sel("orderFrontRegardless"));
+        }
+    }
+
+    fn ns_window(window: &Window) -> Option<*mut c_void> {
+        unsafe {
+            let mut info: SdlSysWmInfo = std::mem::zeroed();
+            sdl2::sys::SDL_GetVersion(&mut info.version);
+            if SDL_GetWindowWMInfo(window.raw(), &mut info) == sdl2::sys::SDL_bool::SDL_FALSE {
+                return None;
+            }
+            if info.subsystem != SDL_SYSWM_COCOA {
+                return None;
+            }
+            let ns_window = info.info.cocoa.window;
+            (!ns_window.is_null()).then_some(ns_window)
+        }
+    }
+
+    unsafe fn activate_application() {
+        let ns_application = objc_getClass(cstr("NSApplication").as_ptr());
+        if ns_application.is_null() {
+            return;
+        }
+        let app = send_id(ns_application, sel("sharedApplication"));
+        if app.is_null() {
+            return;
+        }
+        let _ = send_isize_bool(
+            app,
+            sel("setActivationPolicy:"),
+            NS_APPLICATION_ACTIVATION_POLICY_REGULAR,
+        );
+        send_bool(app, sel("activateIgnoringOtherApps:"), true);
+
+        let ns_running_application = objc_getClass(cstr("NSRunningApplication").as_ptr());
+        if ns_running_application.is_null() {
+            return;
+        }
+        let running_app = send_id(ns_running_application, sel("currentApplication"));
+        if running_app.is_null() {
+            return;
+        }
+        let _ = send_usize_bool(
+            running_app,
+            sel("activateWithOptions:"),
+            NS_APPLICATION_ACTIVATE_ALL_WINDOWS | NS_APPLICATION_ACTIVATE_IGNORING_OTHER_APPS,
+        );
+    }
+
+    unsafe fn send_id(receiver: *mut c_void, selector: *mut c_void) -> *mut c_void {
+        let send: unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void =
+            std::mem::transmute(objc_msgSend as *const ());
+        send(receiver, selector)
+    }
+
+    unsafe fn send_bool(receiver: *mut c_void, selector: *mut c_void, value: bool) {
+        let send: unsafe extern "C" fn(*mut c_void, *mut c_void, bool) =
+            std::mem::transmute(objc_msgSend as *const ());
+        send(receiver, selector, value);
+    }
+
+    unsafe fn send_isize_bool(receiver: *mut c_void, selector: *mut c_void, value: isize) -> bool {
+        let send: unsafe extern "C" fn(*mut c_void, *mut c_void, isize) -> bool =
+            std::mem::transmute(objc_msgSend as *const ());
+        send(receiver, selector, value)
+    }
+
+    unsafe fn send_usize_bool(receiver: *mut c_void, selector: *mut c_void, value: usize) -> bool {
+        let send: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> bool =
+            std::mem::transmute(objc_msgSend as *const ());
+        send(receiver, selector, value)
+    }
+
+    unsafe fn send_void(receiver: *mut c_void, selector: *mut c_void, value: *mut c_void) {
+        let send: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) =
+            std::mem::transmute(objc_msgSend as *const ());
+        send(receiver, selector, value);
+    }
+
+    unsafe fn send_void_no_args(receiver: *mut c_void, selector: *mut c_void) {
+        let send: unsafe extern "C" fn(*mut c_void, *mut c_void) =
+            std::mem::transmute(objc_msgSend as *const ());
+        send(receiver, selector);
+    }
+
+    fn sel(name: &str) -> *mut c_void {
+        unsafe { sel_registerName(cstr(name).as_ptr()) }
+    }
+
+    fn cstr(value: &str) -> CString {
+        CString::new(value).expect("Objective-C selector/class names must not contain NUL")
+    }
 }

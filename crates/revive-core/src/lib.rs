@@ -17,6 +17,7 @@ use snes_emulator::cartridge::Cartridge as SnesCartridge;
 use snes_emulator::emulator::Emulator as SnesEmulator;
 
 pub type Result<T> = std::result::Result<T, String>;
+const PCE_VISIBLE_HEIGHT: usize = 208;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemKind {
@@ -634,7 +635,7 @@ impl SnesAdapter {
     }
 
     pub fn load_state_from_slot(&mut self, slot: u8) -> Result<()> {
-        let path = state_path(SystemKind::Snes, &self.rom_path, slot, "sns");
+        let path = readable_state_path(SystemKind::Snes, &self.rom_path, slot, "sns");
         self.emulator.load_state_from_file(&path)
     }
 
@@ -748,7 +749,7 @@ impl MegaDriveAdapter {
     }
 
     pub fn load_state_from_slot(&mut self, slot: u8) -> Result<()> {
-        let path = state_path(SystemKind::MegaDrive, &self.rom_path, slot, "mdst");
+        let path = readable_state_path(SystemKind::MegaDrive, &self.rom_path, slot, "mdst");
         self.emulator.load_state_from_file(&path)
     }
 
@@ -819,18 +820,21 @@ impl PceAdapter {
 
     pub fn frame(&mut self) -> FrameView<'_> {
         let width = self.emulator.display_width();
-        let height = self.emulator.display_height();
-        let expected = width * height;
+        let raw_height = self.emulator.display_height();
+        let expected = width * raw_height;
         if self.latest_frame.len() != expected {
             self.latest_frame.resize(expected, 0);
         }
 
+        let height = pce_visible_height(raw_height);
         self.rgb_frame.clear();
-        self.rgb_frame.reserve(expected * 3);
-        for &pixel in &self.latest_frame {
-            self.rgb_frame.push(((pixel >> 16) & 0xFF) as u8);
-            self.rgb_frame.push(((pixel >> 8) & 0xFF) as u8);
-            self.rgb_frame.push((pixel & 0xFF) as u8);
+        self.rgb_frame.reserve(width * height * 3);
+        for row in self.latest_frame.chunks_exact(width).take(height) {
+            for &pixel in row {
+                self.rgb_frame.push(((pixel >> 16) & 0xFF) as u8);
+                self.rgb_frame.push(((pixel >> 8) & 0xFF) as u8);
+                self.rgb_frame.push((pixel & 0xFF) as u8);
+            }
         }
 
         FrameView {
@@ -923,7 +927,7 @@ impl PceAdapter {
     }
 
     pub fn load_state_from_slot(&mut self, slot: u8) -> Result<()> {
-        let path = state_path(SystemKind::Pce, &self.rom_path, slot, "pcst");
+        let path = readable_state_path(SystemKind::Pce, &self.rom_path, slot, "pcst");
         self.emulator
             .load_state_from_file(&path)
             .map_err(|err| err.to_string())?;
@@ -946,6 +950,10 @@ impl PceAdapter {
         .map_err(|err| err.to_string())?;
         Ok(())
     }
+}
+
+fn pce_visible_height(raw_height: usize) -> usize {
+    raw_height.min(PCE_VISIBLE_HEIGHT)
 }
 
 pub struct GameBoyAdapter {
@@ -1168,7 +1176,7 @@ impl GameBoyAdvanceAdapter {
     }
 
     pub fn load_state_from_slot(&mut self, slot: u8) -> Result<()> {
-        let path = state_path(SystemKind::GameBoyAdvance, &self.rom_path, slot, "gbas");
+        let path = readable_state_path(SystemKind::GameBoyAdvance, &self.rom_path, slot, "gbas");
         let state_data = std::fs::read(path).map_err(|err| err.to_string())?;
         self.emulator
             .load_state(&state_data)
@@ -1412,11 +1420,28 @@ fn state_path(system: SystemKind, rom_path: &Path, slot: u8, ext: &str) -> PathB
     let stem = rom_stem(rom_path);
     let path = Path::new("states")
         .join(system.state_dir())
-        .join(format!("{stem}.slot{slot}.{ext}"));
+        .join(stem)
+        .join(format!("slot{slot}.{ext}"));
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     path
+}
+
+fn readable_state_path(system: SystemKind, rom_path: &Path, slot: u8, ext: &str) -> PathBuf {
+    let path = state_path(system, rom_path, slot, ext);
+    if path.exists() {
+        path
+    } else {
+        legacy_state_path(system, rom_path, slot, ext)
+    }
+}
+
+fn legacy_state_path(system: SystemKind, rom_path: &Path, slot: u8, ext: &str) -> PathBuf {
+    let stem = rom_stem(rom_path);
+    Path::new("states")
+        .join(system.state_dir())
+        .join(format!("{stem}.slot{slot}.{ext}"))
 }
 
 #[cfg(test)]
@@ -1474,5 +1499,13 @@ mod tests {
         let _ = std::fs::remove_file(path);
 
         assert_eq!(detected, SystemKind::MegaDrive);
+    }
+
+    #[test]
+    fn pce_video_crops_bottom_overscan() {
+        assert_eq!(pce_visible_height(240), 208);
+        assert_eq!(pce_visible_height(224), 208);
+        assert_eq!(pce_visible_height(216), 208);
+        assert_eq!(pce_visible_height(200), 200);
     }
 }
