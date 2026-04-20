@@ -399,8 +399,12 @@ fn run_sdl_loop(
                     let key = *key;
                     let keymod = *keymod;
                     if key == Keycode::Tab {
-                        let live_memory = MemorySnapshot::capture(&core);
-                        cheat_panel.toggle(&live_memory);
+                        if cheat_panel.is_visible() {
+                            cheat_panel.hide();
+                        } else {
+                            let live_memory = MemorySnapshot::capture(&core);
+                            cheat_panel.toggle(&live_memory);
+                        }
                         continue;
                     }
                     if cheat_panel.is_visible() && egui_ctx.wants_keyboard_input() {
@@ -466,7 +470,6 @@ fn run_sdl_loop(
             feed_audio(queue, &mut core, &mut audio_scratch)?;
         }
 
-        let live_memory = MemorySnapshot::capture(&core);
         {
             let frame = core.frame();
             if (frame.width, frame.height) != texture_size {
@@ -480,7 +483,7 @@ fn run_sdl_loop(
                 };
                 let _ = window.set_size(new_w, game_h);
             }
-            game_renderer.upload_rgb24_frame(frame.data, frame.width, frame.height);
+            game_renderer.upload_frame(frame.data, frame.width, frame.height, frame.format);
         }
 
         let (win_w, win_h) = window.size();
@@ -497,6 +500,8 @@ fn run_sdl_loop(
         game_renderer.draw(0, 0, game_vp_w as i32, win_h as i32);
 
         if cheat_panel.is_visible() {
+            let live_memory = MemorySnapshot::capture(&core);
+
             unsafe {
                 gl::Viewport(0, 0, win_w as i32, win_h as i32);
                 gl::Enable(gl::BLEND);
@@ -634,6 +639,9 @@ fn handle_state_key(core: &mut CoreInstance, key: Keycode, keymod: Mod) -> bool 
     } else {
         match core.load_state_from_slot(slot) {
             Ok(()) => println!("Loaded state slot {slot}"),
+            Err(err) if err.starts_with("no saved state file found") => {
+                eprintln!("state slot {slot} is empty: {err}")
+            }
             Err(err) => eprintln!("failed to load state slot {slot}: {err}"),
         }
     }

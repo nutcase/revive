@@ -96,6 +96,8 @@ pub enum VirtualButton {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PixelFormat {
     Rgb24,
+    Rgba8888,
+    Bgra8888,
 }
 
 pub struct FrameView<'a> {
@@ -479,6 +481,7 @@ impl NesAdapter {
     }
 
     pub fn load_state_from_slot(&mut self, slot: u8) -> Result<()> {
+        ensure_readable_nes_state_path(&self.rom_path, slot)?;
         self.nes.load_state(slot).map_err(|err| err.to_string())
     }
 
@@ -492,7 +495,6 @@ pub struct SnesAdapter {
     rom_path: PathBuf,
     title: String,
     key_states: snes_emulator::input::KeyStates,
-    rgb_frame: Vec<u8>,
     audio_source: snes_emulator::audio::SnesAudioCallbackSource,
     audio_sample_rate_hz: u32,
     audio_frame_remainder: u32,
@@ -519,7 +521,6 @@ impl SnesAdapter {
             rom_path: path.to_path_buf(),
             title,
             key_states: snes_emulator::input::KeyStates::default(),
-            rgb_frame: Vec::new(),
             audio_source,
             audio_sample_rate_hz,
             audio_frame_remainder: 0,
@@ -538,18 +539,11 @@ impl SnesAdapter {
 
     pub fn frame(&mut self) -> FrameView<'_> {
         let fb = self.emulator.framebuffer();
-        self.rgb_frame.clear();
-        self.rgb_frame.reserve(fb.len() * 3);
-        for &pixel in fb {
-            self.rgb_frame.push(((pixel >> 16) & 0xFF) as u8);
-            self.rgb_frame.push(((pixel >> 8) & 0xFF) as u8);
-            self.rgb_frame.push((pixel & 0xFF) as u8);
-        }
         FrameView {
             width: 256,
             height: 224,
-            format: PixelFormat::Rgb24,
-            data: &self.rgb_frame,
+            format: PixelFormat::Bgra8888,
+            data: argb8888_u32_frame_as_bgra8888_bytes(fb),
         }
     }
 
@@ -635,7 +629,7 @@ impl SnesAdapter {
     }
 
     pub fn load_state_from_slot(&mut self, slot: u8) -> Result<()> {
-        let path = readable_state_path(SystemKind::Snes, &self.rom_path, slot, "sns");
+        let path = readable_state_path(SystemKind::Snes, &self.rom_path, slot, "sns")?;
         self.emulator.load_state_from_file(&path)
     }
 
@@ -749,7 +743,7 @@ impl MegaDriveAdapter {
     }
 
     pub fn load_state_from_slot(&mut self, slot: u8) -> Result<()> {
-        let path = readable_state_path(SystemKind::MegaDrive, &self.rom_path, slot, "mdst");
+        let path = readable_state_path(SystemKind::MegaDrive, &self.rom_path, slot, "mdst")?;
         self.emulator.load_state_from_file(&path)
     }
 
@@ -927,7 +921,7 @@ impl PceAdapter {
     }
 
     pub fn load_state_from_slot(&mut self, slot: u8) -> Result<()> {
-        let path = readable_state_path(SystemKind::Pce, &self.rom_path, slot, "pcst");
+        let path = readable_state_path(SystemKind::Pce, &self.rom_path, slot, "pcst")?;
         self.emulator
             .load_state_from_file(&path)
             .map_err(|err| err.to_string())?;
@@ -962,7 +956,6 @@ pub struct GameBoyAdapter {
     title: String,
     system: SystemKind,
     pressed_mask: u8,
-    rgb_frame: Vec<u8>,
     audio_sample_rate_hz: u32,
 }
 
@@ -979,7 +972,6 @@ impl GameBoyAdapter {
             title: rom_stem(path),
             system,
             pressed_mask: 0,
-            rgb_frame: Vec::with_capacity((GB_LCD_WIDTH * GB_LCD_HEIGHT * 3) as usize),
             audio_sample_rate_hz,
         })
     }
@@ -999,12 +991,11 @@ impl GameBoyAdapter {
     }
 
     pub fn frame(&mut self) -> FrameView<'_> {
-        rgba8888_to_rgb24(self.emulator.frame_rgba8888(), &mut self.rgb_frame);
         FrameView {
             width: GB_LCD_WIDTH as usize,
             height: GB_LCD_HEIGHT as usize,
-            format: PixelFormat::Rgb24,
-            data: &self.rgb_frame,
+            format: PixelFormat::Rgba8888,
+            data: self.emulator.frame_rgba8888(),
         }
     }
 
@@ -1084,7 +1075,6 @@ pub struct GameBoyAdvanceAdapter {
     rom_path: PathBuf,
     title: String,
     pressed_mask: u16,
-    rgb_frame: Vec<u8>,
     audio_sample_rate_hz: u32,
 }
 
@@ -1102,7 +1092,6 @@ impl GameBoyAdvanceAdapter {
             rom_path: path.to_path_buf(),
             title: rom_stem(path),
             pressed_mask: 0,
-            rgb_frame: Vec::with_capacity((GBA_LCD_WIDTH * GBA_LCD_HEIGHT * 3) as usize),
             audio_sample_rate_hz,
         })
     }
@@ -1120,12 +1109,11 @@ impl GameBoyAdvanceAdapter {
     }
 
     pub fn frame(&mut self) -> FrameView<'_> {
-        rgba8888_to_rgb24(self.frame_buffer.pixels(), &mut self.rgb_frame);
         FrameView {
             width: GBA_LCD_WIDTH as usize,
             height: GBA_LCD_HEIGHT as usize,
-            format: PixelFormat::Rgb24,
-            data: &self.rgb_frame,
+            format: PixelFormat::Rgba8888,
+            data: self.frame_buffer.pixels(),
         }
     }
 
@@ -1176,7 +1164,7 @@ impl GameBoyAdvanceAdapter {
     }
 
     pub fn load_state_from_slot(&mut self, slot: u8) -> Result<()> {
-        let path = readable_state_path(SystemKind::GameBoyAdvance, &self.rom_path, slot, "gbas");
+        let path = readable_state_path(SystemKind::GameBoyAdvance, &self.rom_path, slot, "gbas")?;
         let state_data = std::fs::read(path).map_err(|err| err.to_string())?;
         self.emulator
             .load_state(&state_data)
@@ -1300,14 +1288,9 @@ fn write_byte(memory: &mut [u8], offset: usize, value: u8) -> bool {
     }
 }
 
-fn rgba8888_to_rgb24(rgba: &[u8], rgb: &mut Vec<u8>) {
-    rgb.clear();
-    rgb.reserve(rgba.len() / 4 * 3);
-    for pixel in rgba.chunks_exact(4) {
-        rgb.push(pixel[0]);
-        rgb.push(pixel[1]);
-        rgb.push(pixel[2]);
-    }
+fn argb8888_u32_frame_as_bgra8888_bytes(frame: &[u32]) -> &[u8] {
+    debug_assert!(cfg!(target_endian = "little"));
+    unsafe { std::slice::from_raw_parts(frame.as_ptr() as *const u8, std::mem::size_of_val(frame)) }
 }
 
 fn load_pce_persistent_saves(emulator: &mut PceEmulator, rom_path: &Path) {
@@ -1416,25 +1399,39 @@ fn rom_stem(path: &Path) -> String {
         .to_string()
 }
 
-fn state_path(system: SystemKind, rom_path: &Path, slot: u8, ext: &str) -> PathBuf {
+fn state_file_path(system: SystemKind, rom_path: &Path, slot: u8, ext: &str) -> PathBuf {
     let stem = rom_stem(rom_path);
-    let path = Path::new("states")
+    Path::new("states")
         .join(system.state_dir())
         .join(stem)
-        .join(format!("slot{slot}.{ext}"));
+        .join(format!("slot{slot}.{ext}"))
+}
+
+fn state_path(system: SystemKind, rom_path: &Path, slot: u8, ext: &str) -> PathBuf {
+    let path = state_file_path(system, rom_path, slot, ext);
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     path
 }
 
-fn readable_state_path(system: SystemKind, rom_path: &Path, slot: u8, ext: &str) -> PathBuf {
-    let path = state_path(system, rom_path, slot, ext);
+fn readable_state_path(
+    system: SystemKind,
+    rom_path: &Path,
+    slot: u8,
+    ext: &str,
+) -> Result<PathBuf> {
+    let path = state_file_path(system, rom_path, slot, ext);
     if path.exists() {
-        path
-    } else {
-        legacy_state_path(system, rom_path, slot, ext)
+        return Ok(path);
     }
+
+    let legacy_path = legacy_state_path(system, rom_path, slot, ext);
+    if legacy_path.exists() {
+        return Ok(legacy_path);
+    }
+
+    Err(missing_state_file_error(&[path, legacy_path]))
 }
 
 fn legacy_state_path(system: SystemKind, rom_path: &Path, slot: u8, ext: &str) -> PathBuf {
@@ -1442,6 +1439,34 @@ fn legacy_state_path(system: SystemKind, rom_path: &Path, slot: u8, ext: &str) -
     Path::new("states")
         .join(system.state_dir())
         .join(format!("{stem}.slot{slot}.{ext}"))
+}
+
+fn ensure_readable_nes_state_path(rom_path: &Path, slot: u8) -> Result<()> {
+    let path = state_file_path(SystemKind::Nes, rom_path, slot, "sav");
+    if path.exists() {
+        return Ok(());
+    }
+
+    let legacy_path = legacy_nes_state_path(rom_path, slot);
+    if legacy_path.exists() {
+        return Ok(());
+    }
+
+    Err(missing_state_file_error(&[path, legacy_path]))
+}
+
+fn legacy_nes_state_path(rom_path: &Path, slot: u8) -> PathBuf {
+    let stem = rom_stem(rom_path);
+    Path::new("states").join(format!("{stem}.slot{slot}.sav"))
+}
+
+fn missing_state_file_error(paths: &[PathBuf]) -> String {
+    let looked_for = paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(" or ");
+    format!("no saved state file found (looked for {looked_for})")
 }
 
 #[cfg(test)]
@@ -1507,5 +1532,33 @@ mod tests {
         assert_eq!(pce_visible_height(224), 208);
         assert_eq!(pce_visible_height(216), 208);
         assert_eq!(pce_visible_height(200), 200);
+    }
+
+    #[test]
+    fn snes_argb_pixels_are_exposed_as_bgra_bytes() {
+        let pixels = [0xFF11_2233u32, 0x8044_5566u32];
+        let bytes = argb8888_u32_frame_as_bgra8888_bytes(&pixels);
+
+        assert_eq!(bytes, &[0x33, 0x22, 0x11, 0xFF, 0x66, 0x55, 0x44, 0x80]);
+    }
+
+    #[test]
+    fn missing_state_file_error_lists_candidate_paths() {
+        let err = missing_state_file_error(&[
+            PathBuf::from("states/snes/game/slot1.sns"),
+            PathBuf::from("states/snes/game.slot1.sns"),
+        ]);
+
+        assert_eq!(
+            err,
+            "no saved state file found (looked for states/snes/game/slot1.sns or states/snes/game.slot1.sns)"
+        );
+    }
+
+    #[test]
+    fn nes_legacy_state_path_matches_vendored_core_layout() {
+        let path = legacy_nes_state_path(Path::new("roms/Mario.nes"), 1);
+
+        assert_eq!(path, PathBuf::from("states/Mario.slot1.sav"));
     }
 }

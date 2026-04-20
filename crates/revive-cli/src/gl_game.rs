@@ -1,5 +1,6 @@
 use egui_sdl2_gl::gl;
 use egui_sdl2_gl::gl::types::*;
+use revive_core::PixelFormat;
 use std::ffi::CString;
 use std::ptr;
 
@@ -37,7 +38,7 @@ pub struct GlGameRenderer {
     texture: GLuint,
     tex_w: usize,
     tex_h: usize,
-    rgba_buf: Vec<u8>,
+    tex_format: Option<PixelFormat>,
 }
 
 impl GlGameRenderer {
@@ -115,39 +116,32 @@ impl GlGameRenderer {
                 texture,
                 tex_w: 0,
                 tex_h: 0,
-                rgba_buf: Vec::new(),
+                tex_format: None,
             }
         }
     }
 
-    pub fn upload_rgb24_frame(&mut self, frame: &[u8], w: usize, h: usize) {
-        let pixel_count = w * h;
-        self.rgba_buf.resize(pixel_count * 4, 0xFF);
-        for index in 0..pixel_count {
-            let src = index * 3;
-            let dst = index * 4;
-            self.rgba_buf[dst] = frame.get(src).copied().unwrap_or(0);
-            self.rgba_buf[dst + 1] = frame.get(src + 1).copied().unwrap_or(0);
-            self.rgba_buf[dst + 2] = frame.get(src + 2).copied().unwrap_or(0);
-            self.rgba_buf[dst + 3] = 0xFF;
-        }
+    pub fn upload_frame(&mut self, frame: &[u8], w: usize, h: usize, format: PixelFormat) {
+        let (internal_format, external_format) = gl_texture_formats(format);
 
         unsafe {
             gl::BindTexture(gl::TEXTURE_2D, self.texture);
-            if w != self.tex_w || h != self.tex_h {
+            gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
+            if w != self.tex_w || h != self.tex_h || self.tex_format != Some(format) {
                 gl::TexImage2D(
                     gl::TEXTURE_2D,
                     0,
-                    gl::RGBA8 as GLint,
+                    internal_format,
                     w as GLsizei,
                     h as GLsizei,
                     0,
-                    gl::RGBA,
+                    external_format,
                     gl::UNSIGNED_BYTE,
-                    self.rgba_buf.as_ptr() as *const _,
+                    frame.as_ptr() as *const _,
                 );
                 self.tex_w = w;
                 self.tex_h = h;
+                self.tex_format = Some(format);
             } else {
                 gl::TexSubImage2D(
                     gl::TEXTURE_2D,
@@ -156,9 +150,9 @@ impl GlGameRenderer {
                     0,
                     w as GLsizei,
                     h as GLsizei,
-                    gl::RGBA,
+                    external_format,
                     gl::UNSIGNED_BYTE,
-                    self.rgba_buf.as_ptr() as *const _,
+                    frame.as_ptr() as *const _,
                 );
             }
             gl::BindTexture(gl::TEXTURE_2D, 0);
@@ -197,6 +191,14 @@ impl GlGameRenderer {
             gl::BindTexture(gl::TEXTURE_2D, 0);
             gl::UseProgram(0);
         }
+    }
+}
+
+fn gl_texture_formats(format: PixelFormat) -> (GLint, GLenum) {
+    match format {
+        PixelFormat::Rgb24 => (gl::RGB8 as GLint, gl::RGB),
+        PixelFormat::Rgba8888 => (gl::RGBA8 as GLint, gl::RGBA),
+        PixelFormat::Bgra8888 => (gl::RGBA8 as GLint, gl::BGRA),
     }
 }
 
