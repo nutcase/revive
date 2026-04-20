@@ -269,8 +269,10 @@ impl Dsp {
 
         let left_target = (left as i32) << SCALE_SHIFT;
         let right_target = (right as i32) << SCALE_SHIFT;
-        self.output_filter_left += ((left_target - self.output_filter_left) * ALPHA_Q8) >> 8;
-        self.output_filter_right += ((right_target - self.output_filter_right) * ALPHA_Q8) >> 8;
+        self.output_filter_left =
+            advance_output_filter(self.output_filter_left, left_target, ALPHA_Q8);
+        self.output_filter_right =
+            advance_output_filter(self.output_filter_right, right_target, ALPHA_Q8);
 
         (
             dsp_helpers::clamp(self.output_filter_left >> SCALE_SHIFT) as i16,
@@ -751,6 +753,12 @@ fn echo_address(start: u16, position: i32) -> u32 {
     start.wrapping_add(position as u16) as u32
 }
 
+fn advance_output_filter(current: i32, target: i32, alpha_q8: i32) -> i32 {
+    let delta = (((target as i64) - (current as i64)) * (alpha_q8 as i64)) >> 8;
+    let next = (current as i64) + delta;
+    next.clamp(i32::MIN as i64, i32::MAX as i64) as i32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -760,5 +768,18 @@ mod tests {
         assert_eq!(echo_address(0xF800, 0x0800), 0x0000);
         assert_eq!(echo_address(0xF800, 0x0804), 0x0004);
         assert_eq!(echo_address(0xFFFC, 0x0004), 0x0000);
+    }
+
+    #[test]
+    fn output_filter_handles_full_scale_swings_without_overflow() {
+        let mut dsp = Dsp::new(std::ptr::null_mut());
+
+        let first = dsp.filter_final_sample(i16::MAX, i16::MIN);
+        let second = dsp.filter_final_sample(i16::MIN, i16::MAX);
+
+        assert!(first.0 > 0);
+        assert!(first.1 < 0);
+        assert!(second.0 < 0);
+        assert!(second.1 > 0);
     }
 }
