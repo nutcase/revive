@@ -1,0 +1,17 @@
+[package]
+name = "revive-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "revive_core"
+path = "src/lib.rs"
+
+[dependencies]
+emulator-core = { path = "../../../gameboy/crates/core" }
+emulator-gb = { path = "../../../gameboy/crates/gb" }
+emulator-gba = { path = "../../../gameboy/crates/gba" }
+megadrive-core = { path = "../../../megadrive/crates/core" }
+nes-emulator = { path = "../../../nes-rust/crates/core" }
+pce = { package = "pce-core", path = "../../../pce/crates/core" }
+snes-core = { path = "../../../snes-rust/crates/core" }
