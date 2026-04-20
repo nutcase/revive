@@ -166,6 +166,31 @@ fn bus_virq_enable_on_matching_line_after_line_start_sets_timeup_immediately() {
 }
 
 #[test]
+fn bus_hv_irq_reprogramming_htime_after_current_dot_does_not_retrigger_old_vline() {
+    let mut bus = Bus::new(vec![]);
+
+    bus.write_u8(0x4207, 0xA0);
+    bus.write_u8(0x4208, 0x00);
+    bus.write_u8(0x4209, 0x16);
+    bus.write_u8(0x420A, 0x00);
+    bus.write_u8(0x4200, 0x30);
+
+    bus.get_ppu_mut().step(22 * 341 + 285);
+    assert_eq!(bus.get_ppu().get_scanline(), 22);
+    assert_eq!(bus.get_ppu().get_cycle(), 285);
+    let _ = bus.read_u8(0x4211);
+
+    bus.write_u8(0x4207, 0xA8);
+
+    let timeup = bus.read_u8(0x4211);
+    assert_eq!(
+        timeup & 0x80,
+        0,
+        "moving HTIME to a dot that already passed must not retrigger the old matching V line"
+    );
+}
+
+#[test]
 fn bus_unmapped_io_reads_preserve_open_bus_value() {
     let mut bus = Bus::new(vec![]);
 

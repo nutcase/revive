@@ -5711,15 +5711,16 @@ impl Bus {
     }
 
     #[inline]
-    fn htimer_condition_is_true_now(&self, scanline: u16, cycle: u16) -> bool {
+    fn htimer_condition_matches_current_dot(&self, scanline: u16, cycle: u16) -> bool {
         self.current_hirq_dot(scanline)
-            .map(|h| cycle >= h)
+            .map(|h| cycle == h)
             .unwrap_or(false)
     }
 
     // Re-check IRQ timer comparators when IRQ enables or timer registers are written mid-scanline.
-    // On hardware the timer flag is level-sensitive to the current H/V counters, so making the
-    // configured condition true at the current position should assert TIMEUP immediately.
+    // A newly written H compare should only fire immediately when it matches the current dot,
+    // not when that dot has already passed. Several games update HTIME before VTIME inside an
+    // IRQ handler; treating "past H" as a live match retriggers the old V line immediately.
     fn recheck_irq_timer_match(&mut self) {
         if !(self.irq_h_enabled || self.irq_v_enabled) {
             return;
@@ -5732,13 +5733,13 @@ impl Bus {
         match (self.irq_h_enabled, self.irq_v_enabled) {
             (true, true) => {
                 self.irq_v_matched_line = if v_match { Some(line) } else { None };
-                if v_match && self.htimer_condition_is_true_now(line, cycle) {
+                if v_match && self.htimer_condition_matches_current_dot(line, cycle) {
                     self.irq_pending = true;
                 }
             }
             (true, false) => {
                 self.irq_v_matched_line = None;
-                if self.htimer_condition_is_true_now(line, cycle) {
+                if self.htimer_condition_matches_current_dot(line, cycle) {
                     self.irq_pending = true;
                 }
             }
