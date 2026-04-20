@@ -4,14 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Revive is a unified SDL2 launcher for four separate Rust emulator cores maintained as sibling repositories. The cores are consumed as **path dependencies** from directories adjacent to this workspace:
+Revive is a unified SDL2/OpenGL/egui launcher for the emulator cores vendored into this repository under `crates/cores/`. The frontend runs one active ROM at a time and routes system-specific behavior through `revive-core` adapters.
 
-- `../nes-rust/crates/core` → `nes-emulator`
-- `../snes-rust/crates/core` → `snes-core` (crate name `snes_emulator`)
-- `../megadrive/crates/core` → `megadrive-core`
-- `../pce/crates/core` → `pce-core` (imported as `pce`)
+Vendored core crates:
 
-Those sibling checkouts must exist for `cargo build` to succeed. If a core's public API changes, the adapter for that system in `revive-core` has to be updated in lockstep.
+- `crates/cores/nes` → `nes-emulator`
+- `crates/cores/snes` → `snes-core` (crate name `snes_emulator`)
+- `crates/cores/megadrive` → `megadrive-core`
+- `crates/cores/pce` → `pce-core` (imported as `pce`)
+- `crates/cores/gameboy/core` → `emulator-core`
+- `crates/cores/gameboy/gb` → `emulator-gb`
+- `crates/cores/gameboy/gba` → `emulator-gba`
+
+If a core's public API changes, the adapter for that system in `revive-core` has to be updated in lockstep. Upstream sibling repositories are no longer required for a local build; sync core changes into `crates/cores/` explicitly.
 
 ## Common commands
 
@@ -24,22 +29,26 @@ cargo run -- run <rom> --cheats cheats/game.json
 cargo run -- <rom> --no-audio
 
 cargo build
-cargo test                          # workspace tests (revive-core + revive-cheat)
+cargo test                          # workspace tests
 cargo test -p revive-cheat
 cargo test -p revive-core detects_megadrive_bin_header
+cargo test -p nes-emulator save_state
+cargo test -p snes-core
 ```
 
 SDL2 is vendored via `sdl2 = { features = ["bundled", "static-link"] }`, so no system SDL install is required, but a C/C++ toolchain and CMake are. `.cargo/config.toml` sets `CMAKE_POLICY_VERSION_MINIMUM=3.5` to work around newer CMake versions rejecting the bundled build.
 
 ## Architecture
 
-Three-crate workspace, default binary is `revive-cli`:
+Workspace layout, default binary is `revive-cli`:
 
 - **`revive-core`** — Defines the `CoreInstance` enum that wraps each backend (`NesAdapter`, `SnesAdapter`, `MegaDriveAdapter`, `PceAdapter`) and exposes a uniform surface: `load_rom`, `step_frame`, `frame` (returning an `RGB24` `FrameView`), `audio_spec`/`drain_audio_i16`, `set_button`, `memory_regions`/`read_memory`/`write_memory_byte`, `save_state_to_slot`/`load_state_from_slot`, `flush_persistent_save`. `SystemKind` and `VirtualButton` are the two abstractions every adapter translates to/from its native types. `detect_system` handles extension-based routing, with a `SEGA` header check as the only disambiguator for `.bin`.
 
 - **`revive-cheat`** — UI-independent. `CheatSearch` runs incremental RAM scans (`SearchFilter` variants split into snapshot-needing vs. value-only in `needs_snapshot`). `CheatManager` persists `CheatEntry` lists as JSON. No dependency on `revive-core` — entries reference regions by string ID (`"wram"`, `"sram"`, `"cpu_ram"`, `"prg_ram"`, `"cart_ram"`, `"bram"`) which the CLI passes straight through to `CoreInstance::write_memory_byte`.
 
-- **`revive-cli`** — The SDL2 frontend. One ROM at a time, single event loop in `run_sdl_loop`. `FrameClock` paces the main thread using per-system native refresh rates (NES/SNES 60.0988, MD 59.9227, PCE 60). Each frame: poll events → apply cheats → `step_frame` → re-apply cheats → drain audio into the `AudioQueue<i16>` → blit the `FrameView` into a streaming RGB24 texture. Key mapping is per-system (`map_nes_key`, `map_snes_key`, etc.); state slots are handled in `handle_state_key` with Ctrl/Cmd as the save modifier.
+- **`revive-cli`** — The SDL2/OpenGL/egui frontend. One ROM at a time, single event loop in `run_sdl_loop`. `FrameClock` paces the main thread using per-system native refresh rates (NES/SNES 60.0988, MD 59.9227, PCE 60, GB/GBA 59.7275). Each frame: poll events → apply cheats → `step_frame` → re-apply cheats → drain audio into the `AudioQueue<i16>` → upload `RGB24` frame data into an OpenGL texture → render the optional egui cheat panel. Key mapping is per-system (`nes_keycode_button`, `snes_keycode_button`, etc.); state slots are handled in `handle_state_key` with Ctrl/Cmd as the save modifier.
+
+- **`crates/cores/*`** — Vendored emulator cores copied from the original standalone projects. Keep local fixes here when they are required by Revive.
 
 ### Per-system quirks to be aware of
 
@@ -50,7 +59,7 @@ Three-crate workspace, default binary is `revive-cli`:
 
 ### State and save files
 
-Save states live in `states/<system>/<rom-stem>.slot<N>.<ext>` (relative to CWD), created on demand. Extensions: NES uses its own internal path (`nes.save_state(slot, stem)`); SNES `.sns`, MD `.mdst`, PCE `.pcst`. SRAM/backup is separate and flushed on clean exit only (`core.flush_persistent_save()` in the shutdown path — crashes skip it).
+Save states live in `states/<system>/<rom-stem>/slot<N>.<ext>` (relative to CWD), created on demand. Extensions: NES `.sav`, SNES `.sns`, MD `.mdst`, PCE `.pcst`, GBA `.gbas`. SRAM/backup is separate and flushed on clean exit only (`core.flush_persistent_save()` in the shutdown path — crashes skip it). Cheats default to `cheats/<system>/<rom-stem>/cheats.json`.
 
 ## Coding notes
 

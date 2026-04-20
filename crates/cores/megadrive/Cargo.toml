@@ -1,0 +1,11 @@
+[package]
+name = "megadrive-core"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "megadrive_core"
+path = "src/lib.rs"
+
+[dependencies]
+bincode = { version = "2", features = ["derive"] }

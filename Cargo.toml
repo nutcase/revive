@@ -1,5 +1,12 @@
 [workspace]
 members = [
+    "crates/cores/gameboy/core",
+    "crates/cores/gameboy/gb",
+    "crates/cores/gameboy/gba",
+    "crates/cores/megadrive",
+    "crates/cores/nes",
+    "crates/cores/pce",
+    "crates/cores/snes",
     "crates/revive-core",
     "crates/revive-cheat",
     "crates/revive-cli",

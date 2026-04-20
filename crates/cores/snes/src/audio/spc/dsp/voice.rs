@@ -1,0 +1,378 @@
+use super::super::apu::Apu;
+use super::brr_block_decoder::BrrBlockDecoder;
+use super::dsp::Dsp;
+use super::dsp_helpers;
+use super::envelope::Envelope;
+use super::gaussian::GAUSS;
+
+#[derive(Clone, Copy)]
+pub enum ResamplingMode {
+    Linear,
+    Gaussian,
+}
+
+#[derive(Clone, Copy, Default)]
+struct SampleWindow {
+    older: i32,
+    previous: i32,
+    current: i32,
+    next: i32,
+}
+
+impl SampleWindow {
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn prime(&mut self, current: i32, next: i32) {
+        *self = Self {
+            older: 0,
+            previous: 0,
+            current,
+            next,
+        };
+    }
+
+    fn advance(&mut self, next: i32) {
+        self.older = self.previous;
+        self.previous = self.current;
+        self.current = self.next;
+        self.next = next;
+    }
+
+    fn linear(&self, sample_pos: i32) -> i32 {
+        let p1 = sample_pos;
+        let p2 = 0x1000 - p1;
+        (self.current * p1 + self.previous * p2) >> 12
+    }
+
+    fn gaussian(&self, sample_pos: i32) -> i32 {
+        let offset = ((sample_pos >> 4) & 0xff) as usize;
+        let mut out = (GAUSS[255 - offset] as i32 * self.older) >> 11;
+        out += (GAUSS[511 - offset] as i32 * self.previous) >> 11;
+        out += (GAUSS[256 + offset] as i32 * self.current) >> 11;
+        out = (out as i16) as i32;
+        out += (GAUSS[offset] as i32 * self.next) >> 11;
+        out
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct VoiceOutput {
+    pub left_out: i32,
+    pub right_out: i32,
+    pub last_voice_out: i32,
+}
+
+impl VoiceOutput {
+    pub fn default() -> VoiceOutput {
+        VoiceOutput {
+            left_out: 0,
+            right_out: 0,
+            last_voice_out: 0,
+        }
+    }
+}
+
+pub const VOICE_BUFFER_LEN: usize = 128;
+
+pub struct VoiceBuffer {
+    pub buffer: Box<[VoiceOutput; VOICE_BUFFER_LEN]>,
+    pub pos: i32,
+}
+
+impl VoiceBuffer {
+    pub fn new() -> VoiceBuffer {
+        VoiceBuffer {
+            buffer: Box::new([VoiceOutput::default(); VOICE_BUFFER_LEN]),
+            pos: 0,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        for i in 0..VOICE_BUFFER_LEN {
+            self.buffer[i] = VoiceOutput::default();
+        }
+        self.pos = 0;
+    }
+
+    pub fn write(&mut self, value: VoiceOutput) {
+        self.buffer[self.pos as usize] = value;
+        self.pos = (self.pos + 1) % (VOICE_BUFFER_LEN as i32);
+    }
+}
+
+pub struct Voice {
+    dsp: *mut Dsp,
+    emulator: *mut Apu,
+    index: u8,
+
+    pub envelope: Box<Envelope>,
+
+    pub vol_left: u8,
+    pub vol_right: u8,
+    pub pitch_low: u8,
+    pitch_high: u8,
+    pub source: u8,
+    pub pitch_mod: bool,
+    pub noise_on: bool,
+    pub echo_on: bool,
+
+    sample_start_address: u32,
+    loop_start_address: u32,
+    brr_block_decoder: Box<BrrBlockDecoder>,
+    sample_address: u32,
+    sample_pos: i32,
+
+    pub resampling_mode: ResamplingMode,
+    sample_window: SampleWindow,
+
+    pub output_buffer: Box<VoiceBuffer>,
+    outx: u8,
+    pub is_muted: bool,
+    pub is_solod: bool,
+}
+
+impl Voice {
+    pub fn new(
+        dsp: *mut Dsp,
+        emulator: *mut Apu,
+        resampling_mode: ResamplingMode,
+        index: u8,
+    ) -> Voice {
+        let mut ret = Voice {
+            dsp: dsp,
+            emulator: emulator,
+            index,
+
+            envelope: Box::new(Envelope::new(dsp)),
+
+            vol_left: 0,
+            vol_right: 0,
+            pitch_low: 0,
+            pitch_high: 0,
+            source: 0,
+            pitch_mod: false,
+            noise_on: false,
+            echo_on: false,
+
+            sample_start_address: 0,
+            loop_start_address: 0,
+            brr_block_decoder: Box::new(BrrBlockDecoder::new()),
+            sample_address: 0,
+            sample_pos: 0,
+
+            resampling_mode: resampling_mode,
+            sample_window: SampleWindow::default(),
+
+            output_buffer: Box::new(VoiceBuffer::new()),
+            outx: 0,
+            is_muted: false,
+            is_solod: false,
+        };
+        ret.reset();
+        ret
+    }
+
+    #[inline]
+    fn dsp(&self) -> &mut Dsp {
+        unsafe { &mut (*self.dsp) }
+    }
+
+    #[inline]
+    fn emulator(&self) -> &mut Apu {
+        unsafe { &mut (*self.emulator) }
+    }
+
+    pub fn reset(&mut self) {
+        self.envelope.reset();
+
+        self.vol_left = 0;
+        self.vol_right = 0;
+        self.pitch_low = 0;
+        self.pitch_high = 0x10;
+        self.source = 0;
+        self.pitch_mod = false;
+        self.noise_on = false;
+        self.outx = 0;
+
+        self.sample_start_address = 0;
+        self.loop_start_address = 0;
+        self.brr_block_decoder.reset(0, 0);
+        self.sample_address = 0;
+        self.sample_pos = 0;
+        self.sample_window.reset();
+
+        self.output_buffer.reset();
+        self.is_muted = false;
+        self.is_solod = false;
+    }
+
+    pub fn render_sample(
+        &mut self,
+        last_voice_out: i32,
+        noise: i32,
+        are_any_voices_solod: bool,
+    ) -> VoiceOutput {
+        let mut pitch = ((self.pitch_high as i32) << 8) | (self.pitch_low as i32);
+        if self.pitch_mod {
+            pitch += ((last_voice_out >> 5) * pitch) >> 10;
+        }
+        if pitch < 0 {
+            pitch = 0;
+        }
+        if pitch > 0x3fff {
+            pitch = 0x3fff;
+        }
+
+        let mut sample = if !self.noise_on {
+            let resampled = match self.resampling_mode {
+                ResamplingMode::Linear => self.sample_window.linear(self.sample_pos),
+                ResamplingMode::Gaussian => self.sample_window.gaussian(self.sample_pos),
+            };
+            dsp_helpers::clamp(resampled) & !1
+        } else {
+            ((noise * 2) as i16) as i32
+        };
+
+        self.envelope.tick();
+        let env_level = self.envelope.level;
+
+        sample = ((sample * env_level) >> 11) & !1;
+        self.outx = ((sample as i16) >> 8) as u8;
+
+        if self.brr_block_decoder.is_end && !self.brr_block_decoder.is_looping {
+            self.envelope.key_off();
+            self.envelope.level = 0;
+            self.dsp().set_endx_bit(self.index);
+        }
+
+        self.sample_pos += pitch;
+        while self.sample_pos >= 0x1000 {
+            self.sample_pos -= 0x1000;
+            self.advance_sample_window();
+        }
+
+        let ret = if self.is_solod || (!self.is_muted && !are_any_voices_solod) {
+            VoiceOutput {
+                left_out: dsp_helpers::multiply_volume(sample, self.vol_left),
+                right_out: dsp_helpers::multiply_volume(sample, self.vol_right),
+                last_voice_out: sample,
+            }
+        } else {
+            VoiceOutput {
+                left_out: 0,
+                right_out: 0,
+                last_voice_out: 0,
+            }
+        };
+        self.output_buffer.write(ret);
+        ret
+    }
+
+    pub fn set_pitch_high(&mut self, value: u8) {
+        self.pitch_high = value & 0x3f;
+    }
+
+    pub fn pitch_high(&self) -> u8 {
+        self.pitch_high
+    }
+
+    pub fn outx(&self) -> u8 {
+        self.outx
+    }
+
+    pub fn key_on(&mut self) {
+        self.read_entry();
+        self.sample_address = self.sample_start_address;
+        self.brr_block_decoder.reset(0, 0);
+        self.read_next_block();
+        self.sample_pos = 0;
+        let current = self.read_next_decoded_sample();
+        let next = self.read_next_decoded_sample();
+        self.sample_window.prime(current, next);
+        self.envelope.key_on();
+    }
+
+    pub fn key_off(&mut self) {
+        self.envelope.key_off();
+    }
+
+    fn read_entry(&mut self) {
+        self.sample_start_address = self.dsp().read_source_dir_start_address(self.source as i32);
+        self.loop_start_address = self.dsp().read_source_dir_loop_address(self.source as i32);
+    }
+
+    fn read_next_block(&mut self) {
+        let mut buf = [0; 9];
+        for i in 0..9 {
+            buf[i] = self.emulator().read_u8(self.sample_address + (i as u32));
+        }
+        self.brr_block_decoder.read(&buf);
+        self.sample_address += 9;
+    }
+
+    fn ensure_block_has_samples(&mut self) {
+        if !self.brr_block_decoder.is_finished() {
+            return;
+        }
+
+        if self.brr_block_decoder.is_end && self.brr_block_decoder.is_looping {
+            self.read_entry();
+            self.sample_address = self.loop_start_address;
+        }
+        self.read_next_block();
+    }
+
+    fn read_next_decoded_sample(&mut self) -> i32 {
+        self.ensure_block_has_samples();
+        self.brr_block_decoder.read_next_sample() as i32
+    }
+
+    fn advance_sample_window(&mut self) {
+        let next = self.read_next_decoded_sample();
+        self.sample_window.advance(next);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SampleWindow;
+
+    #[test]
+    fn sample_window_prime_and_advance_preserves_sample_order() {
+        let mut window = SampleWindow::default();
+
+        window.prime(10, 20);
+        assert_eq!(window.older, 0);
+        assert_eq!(window.previous, 0);
+        assert_eq!(window.current, 10);
+        assert_eq!(window.next, 20);
+
+        window.advance(30);
+        assert_eq!(window.older, 0);
+        assert_eq!(window.previous, 10);
+        assert_eq!(window.current, 20);
+        assert_eq!(window.next, 30);
+
+        window.advance(40);
+        assert_eq!(window.older, 10);
+        assert_eq!(window.previous, 20);
+        assert_eq!(window.current, 30);
+        assert_eq!(window.next, 40);
+    }
+
+    #[test]
+    fn sample_window_linear_interpolates_previous_to_current() {
+        let window = SampleWindow {
+            older: 0,
+            previous: 10,
+            current: 30,
+            next: 0,
+        };
+
+        assert_eq!(window.linear(0), 10);
+        assert_eq!(window.linear(0x800), 20);
+        assert_eq!(window.linear(0x1000), 30);
+    }
+}

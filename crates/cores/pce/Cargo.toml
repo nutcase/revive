@@ -1,0 +1,15 @@
+[package]
+name = "pce-core"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "pce"
+path = "src/lib.rs"
+
+[features]
+default = []
+trace_hw_writes = []
+
+[dependencies]
+bincode = { version = "2.0.1", features = ["derive"] }
