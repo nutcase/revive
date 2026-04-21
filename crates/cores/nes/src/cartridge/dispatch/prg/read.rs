@@ -76,8 +76,13 @@ enum PrgReadHandler {
 }
 
 impl Cartridge {
+    #[inline]
     pub fn read_prg(&self, addr: u16) -> u8 {
         let rom_addr = addr - 0x8000;
+        if self.is_nrom() {
+            return self.read_prg_nrom(rom_addr);
+        }
+
         match self.prg_read_handler() {
             PrgReadHandler::Mapper210 => self.read_prg_mapper210(addr),
             PrgReadHandler::Mapper21 => self.read_prg_mapper21(addr),

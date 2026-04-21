@@ -3,6 +3,11 @@ mod reset;
 use super::{Cartridge, Mirroring};
 
 impl Cartridge {
+    #[inline]
+    pub(crate) fn is_nrom(&self) -> bool {
+        self.mapper == 0
+    }
+
     pub fn mirroring(&self) -> Mirroring {
         self.mirroring
     }

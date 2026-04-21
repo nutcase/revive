@@ -62,6 +62,10 @@ enum ChrReadHandler {
 impl Cartridge {
     #[inline]
     pub fn read_chr(&self, addr: u16) -> u8 {
+        if self.is_nrom() {
+            return self.read_chr_nrom(addr);
+        }
+
         match self.chr_read_handler() {
             ChrReadHandler::Mapper210 => self.read_chr_mapper210(addr),
             ChrReadHandler::Mapper21 => self.read_chr_mapper21(addr),
