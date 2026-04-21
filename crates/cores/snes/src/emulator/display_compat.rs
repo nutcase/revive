@@ -43,25 +43,9 @@ impl Emulator {
 
     // Force unblank regardless of game state (debug/compat aid)
     pub(super) fn maybe_force_unblank(&mut self) {
-        let env_enabled = std::env::var("BOOT_FORCE_UNBLANK")
-            .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or(false);
-        if !env_enabled {
+        let Some((force_always, from, to)) = crate::debug_flags::boot_force_unblank_config() else {
             return;
-        }
-
-        let force_always = std::env::var("BOOT_FORCE_UNBLANK_ALWAYS")
-            .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or(false);
-
-        let from: u64 = std::env::var("BOOT_FORCE_UNBLANK_FROM")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(50); // Start earlier (was 90)
-        let to: u64 = std::env::var("BOOT_FORCE_UNBLANK_TO")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1000); // Extended range (was 600)
+        };
 
         if self.frame_count < from || self.frame_count > to {
             return;
@@ -163,9 +147,11 @@ impl Emulator {
 
     // Auto-unblank helper gated by env controls. Runs at specific frame thresholds.
     pub(super) fn maybe_auto_unblank(&mut self) {
-        let trace_auto_unblank = std::env::var("TRACE_AUTO_UNBLANK")
-            .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or(false);
+        let Some((env_enabled, trace_auto_unblank, threshold)) =
+            crate::debug_flags::compat_auto_unblank_config()
+        else {
+            return;
+        };
         if self.boot_fallback_applied {
             if trace_auto_unblank {
                 eprintln!(
@@ -175,16 +161,6 @@ impl Emulator {
             }
             return;
         }
-        let env_enabled = std::env::var("COMPAT_BOOT_FALLBACK")
-            .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or(false);
-        if !env_enabled && !trace_auto_unblank {
-            return;
-        }
-        let threshold: u64 = std::env::var("COMPAT_AUTO_UNBLANK_FRAME")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(120);
         let second: u64 = threshold.saturating_mul(2);
         let third: u64 = threshold.saturating_mul(3);
 
@@ -313,10 +289,7 @@ impl Emulator {
         ppu_mut.write(0x31, 0x00); // CGADSUB: no layers selected
         ppu_mut.rebuild_presented_framebuffer();
 
-        let do_palette = std::env::var("COMPAT_INJECT_MIN_PALETTE")
-            .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or(false);
-        if do_palette {
+        if crate::debug_flags::compat_inject_min_palette() {
             if crate::debug_flags::boot_verbose() || crate::debug_flags::compat() {
                 println!("COMPAT: Injecting minimal CGRAM palette (fallback)");
             }
@@ -339,10 +312,7 @@ impl Emulator {
 
     // Periodically inject a minimal visible palette until the game loads enough CGRAM
     pub(super) fn maybe_inject_min_palette_periodic(&mut self) {
-        let enabled = std::env::var("COMPAT_PERIODIC_MIN_PALETTE")
-            .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or(false);
-        if !enabled {
+        if !crate::debug_flags::compat_periodic_min_palette() {
             return;
         }
         // Only when CGRAM is still tiny

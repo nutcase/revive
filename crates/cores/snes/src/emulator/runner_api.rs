@@ -11,25 +11,34 @@ impl Emulator {
         emit_audio: bool,
     ) -> bool {
         let frame_start = Instant::now();
-        let trace_slow_ms = std::env::var("TRACE_STARFOX_GUI_SLOW_MS")
-            .ok()
-            .and_then(|v| v.parse::<u128>().ok())
-            .filter(|v| *v > 0)
-            .unwrap_or(0);
-        let is_starfox = self.rom_title().to_ascii_uppercase().contains("STAR FOX");
-        let before_cpu_pc = self.current_cpu_pc();
-        let before_inidisp = self.current_inidisp();
-        let before_tm = self.current_tm();
-        let before_mode = self.current_bg_mode();
+        let trace_slow_ms = crate::debug_flags::trace_starfox_gui_slow_ms();
+        let trace_slow_frame =
+            trace_slow_ms > 0 && self.rom_title().to_ascii_uppercase().contains("STAR FOX");
+        let (before_cpu_pc, before_inidisp, before_tm, before_mode) = if trace_slow_frame {
+            (
+                self.current_cpu_pc(),
+                self.current_inidisp(),
+                self.current_tm(),
+                self.current_bg_mode(),
+            )
+        } else {
+            (0, 0, 0, 0)
+        };
         self.bus
             .get_ppu_mut()
             .set_framebuffer_rendering_enabled(render_frame);
         crate::cartridge::superfx::set_trace_superfx_exec_frame(self.frame_count.wrapping_add(1));
-        let run_frame_start = Instant::now();
+        let run_frame_start = if trace_slow_frame {
+            Some(Instant::now())
+        } else {
+            None
+        };
         self.suppress_next_audio_output = !emit_audio;
         self.run_frame();
         self.suppress_next_audio_output = false;
-        let run_frame_time = run_frame_start.elapsed();
+        let run_frame_time = run_frame_start
+            .map(|start| start.elapsed())
+            .unwrap_or(Duration::ZERO);
         if self.take_save_state_capture_stop_requested() {
             return true;
         }
@@ -37,19 +46,31 @@ impl Emulator {
             return true;
         }
         // Keep state-based diagnostics aligned with the main run loop.
-        let compat_start = Instant::now();
+        let compat_start = if trace_slow_frame {
+            Some(Instant::now())
+        } else {
+            None
+        };
         self.maybe_auto_unblank();
         self.maybe_force_unblank();
         self.maybe_inject_min_palette_periodic();
-        let compat_time = compat_start.elapsed();
+        let compat_time = compat_start
+            .map(|start| start.elapsed())
+            .unwrap_or(Duration::ZERO);
         let mut render_time = Duration::ZERO;
         if render_frame {
-            let render_start = Instant::now();
+            let render_start = if trace_slow_frame {
+                Some(Instant::now())
+            } else {
+                None
+            };
             self.render();
-            render_time = render_start.elapsed();
+            render_time = render_start
+                .map(|start| start.elapsed())
+                .unwrap_or(Duration::ZERO);
         }
         let frame_time = frame_start.elapsed();
-        if is_starfox && trace_slow_ms > 0 && frame_time.as_millis() >= trace_slow_ms {
+        if trace_slow_frame && frame_time.as_millis() >= trace_slow_ms {
             eprintln!(
                 "[STARFOX-FRAME-SLOW] frame={} cpu_pc={:06X}->{:06X} inidisp={:02X}->{:02X} tm={:02X}->{:02X} mode={}->{} run_ms={} compat_ms={} render_ms={} total_ms={}",
                 self.frame_count,

@@ -28,10 +28,7 @@ pub(super) enum CpuInstructionSlice {
 
 impl Emulator {
     pub(super) fn apply_frame_start_debug_controls(&mut self, frame_count: u32) {
-        let nmi_guard_frames: u32 = std::env::var("NMI_GUARD_FRAMES")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
+        let nmi_guard_frames = crate::debug_flags::nmi_guard_frames();
         if nmi_guard_frames > 0 {
             if frame_count <= nmi_guard_frames {
                 self.bus.get_ppu_mut().nmi_enabled = false;
@@ -43,9 +40,9 @@ impl Emulator {
             }
         }
 
-        if std::env::var_os("SHOW_PC").is_some()
-            && (frame_count <= 16 || frame_count.is_multiple_of(30))
-        {
+        let show_pc = crate::debug_flags::show_pc();
+        let debug_cpu_flags = crate::debug_flags::debug_cpu_flags();
+        if show_pc && (frame_count <= 16 || frame_count.is_multiple_of(30)) {
             let cnt4800 = self
                 .bus
                 .spc7110
@@ -62,7 +59,7 @@ impl Emulator {
             );
         }
 
-        if std::env::var_os("DEBUG_CPU_FLAGS").is_some() && frame_count <= 8 {
+        if debug_cpu_flags && frame_count <= 8 {
             println!(
                 "[cpu-flags] frame={} PC={:02X}:{:04X} P=0x{:02X} I={}",
                 frame_count,
@@ -73,15 +70,13 @@ impl Emulator {
             );
         }
 
-        if let Some(n) = std::env::var("FORCE_CLI_FRAMES")
-            .ok()
-            .and_then(|v| v.parse::<u32>().ok())
-        {
+        let n = crate::debug_flags::force_cli_frames();
+        if n > 0 {
             if frame_count <= n {
                 self.cpu
                     .p_mut()
                     .remove(crate::cpu::StatusFlags::IRQ_DISABLE);
-                if std::env::var_os("DEBUG_CPU_FLAGS").is_some() {
+                if debug_cpu_flags {
                     println!(
                         "[cpu-flags] forced CLI at frame={} PC={:02X}:{:04X}",
                         frame_count,
@@ -224,22 +219,26 @@ impl Emulator {
             && batch_cycles > 8
             && !self.debugger.is_paused()
             && !Self::save_state_exact_capture_env_active();
-        let cpu_start = Instant::now();
-        let cpu_cycles: u16 = if config.perf_verbose {
+        let (cpu_cycles, cpu_time): (u16, Duration) = if config.collect_timings {
+            let cpu_start = Instant::now();
             let cycles = if allow_batch {
                 self.cpu.step_multiple(&mut self.bus, batch_cycles)
             } else {
                 self.cpu.step(&mut self.bus) as u16
             };
             let cpu_time = cpu_start.elapsed();
-            self.performance_stats.add_cpu_time(cpu_time);
-            cycles
+            if config.perf_verbose {
+                self.performance_stats.add_cpu_time(cpu_time);
+            }
+            (cycles, cpu_time)
         } else if allow_batch {
-            self.cpu.step_multiple(&mut self.bus, batch_cycles)
+            (
+                self.cpu.step_multiple(&mut self.bus, batch_cycles),
+                Duration::ZERO,
+            )
         } else {
-            self.cpu.step(&mut self.bus) as u16
+            (self.cpu.step(&mut self.bus) as u16, Duration::ZERO)
         };
-        let cpu_time = cpu_start.elapsed();
 
         if config.trace_loop_cycles && loop_iterations < 20 {
             println!(
@@ -321,7 +320,7 @@ impl Emulator {
         &mut self,
         cpu_cycles: u16,
         extra_master: u64,
-        perf_verbose: bool,
+        config: &FrameRunConfig,
     ) -> Duration {
         let master = (cpu_cycles as u64)
             .saturating_mul(CPU_CLOCK_DIVIDER)
@@ -333,10 +332,15 @@ impl Emulator {
             ppu_cycles = 1;
         }
 
+        if !config.collect_timings {
+            self.step_ppu(ppu_cycles, true);
+            return Duration::ZERO;
+        }
+
         let ppu_start = Instant::now();
         self.step_ppu(ppu_cycles, true);
         let ppu_time = ppu_start.elapsed();
-        if perf_verbose {
+        if config.perf_verbose {
             self.performance_stats.add_ppu_time(ppu_time);
         }
         ppu_time
@@ -346,7 +350,7 @@ impl Emulator {
         &mut self,
         cpu_cycles: u16,
         extra_master: u64,
-        perf_verbose: bool,
+        config: &FrameRunConfig,
     ) -> Duration {
         let batch = self.apu_step_batch;
         let force = self.apu_step_force;
@@ -365,17 +369,30 @@ impl Emulator {
             }
         };
 
+        if !config.collect_timings {
+            self.bus.with_apu_mut(step_fn);
+            return Duration::ZERO;
+        }
+
         let apu_start = Instant::now();
         self.bus.with_apu_mut(step_fn);
         let apu_time = apu_start.elapsed();
-        if perf_verbose {
+        if config.perf_verbose {
             self.performance_stats.add_apu_time(apu_time);
         }
         apu_time
     }
 
-    pub(super) fn finish_frame_boundary_catchup(&mut self, start_ppu_frame: u64) -> Duration {
-        let catchup_start = Instant::now();
+    pub(super) fn finish_frame_boundary_catchup(
+        &mut self,
+        start_ppu_frame: u64,
+        collect_timings: bool,
+    ) -> Duration {
+        let catchup_start = if collect_timings {
+            Some(Instant::now())
+        } else {
+            None
+        };
         if self.bus.get_ppu().get_frame() == start_ppu_frame {
             let remaining_master = self.bus.get_ppu().remaining_master_cycles_in_frame();
             if remaining_master > 0 && remaining_master <= 341 * 4 {
@@ -389,7 +406,9 @@ impl Emulator {
                 self.advance_time_without_cpu(remaining_master);
             }
         }
-        catchup_start.elapsed()
+        catchup_start
+            .map(|start| start.elapsed())
+            .unwrap_or(Duration::ZERO)
     }
 
     pub(super) fn flush_end_of_frame_sa1(&mut self, config: &FrameRunConfig) {
@@ -454,8 +473,12 @@ impl Emulator {
         }
     }
 
-    pub(super) fn mix_frame_audio(&mut self) -> Duration {
-        let audio_start = Instant::now();
+    pub(super) fn mix_frame_audio(&mut self, collect_timings: bool) -> Duration {
+        let audio_start = if collect_timings {
+            Some(Instant::now())
+        } else {
+            None
+        };
         let emit_output = !self.suppress_next_audio_output;
         self.suppress_next_audio_output = false;
         self.step_apu_debt(true);
@@ -470,7 +493,9 @@ impl Emulator {
                 }
             });
         }
-        audio_start.elapsed()
+        audio_start
+            .map(|start| start.elapsed())
+            .unwrap_or(Duration::ZERO)
     }
 
     pub(super) fn maybe_log_starfox_slow_frame(

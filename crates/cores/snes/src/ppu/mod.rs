@@ -10,8 +10,15 @@ mod sprites;
 mod window;
 
 fn disable_authoritative_superfx_bg1_source() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("DISABLE_AUTHORITATIVE_SUPERFX_BG1_SOURCE").is_some())
+    #[cfg(not(feature = "runtime-debug-flags"))]
+    {
+        false
+    }
+    #[cfg(feature = "runtime-debug-flags")]
+    {
+        static ON: OnceLock<bool> = OnceLock::new();
+        *ON.get_or_init(|| std::env::var_os("DISABLE_AUTHORITATIVE_SUPERFX_BG1_SOURCE").is_some())
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -55,6 +62,13 @@ pub(crate) struct BgRowCache {
     pub(crate) row: [u8; 8],
 }
 
+#[cfg(not(feature = "runtime-debug-flags"))]
+#[inline(always)]
+pub(crate) fn trace_scanline_state_config() -> Option<TraceScanlineStateConfig> {
+    None
+}
+
+#[cfg(feature = "runtime-debug-flags")]
 pub(crate) fn trace_scanline_state_config() -> Option<TraceScanlineStateConfig> {
     static CFG: OnceLock<Option<TraceScanlineStateConfig>> = OnceLock::new();
     *CFG.get_or_init(|| {
@@ -90,6 +104,13 @@ pub(crate) struct TraceSampleDotConfig {
     pub(crate) y: u16,
 }
 
+#[cfg(not(feature = "runtime-debug-flags"))]
+#[inline(always)]
+pub(crate) fn trace_sample_dot_config() -> Option<TraceSampleDotConfig> {
+    None
+}
+
+#[cfg(feature = "runtime-debug-flags")]
 pub(crate) fn trace_sample_dot_config() -> Option<TraceSampleDotConfig> {
     static CFG: OnceLock<Option<TraceSampleDotConfig>> = OnceLock::new();
     *CFG.get_or_init(|| {
@@ -132,6 +153,13 @@ pub(crate) struct TraceCgramWriteConfig {
     pub(crate) frame_max: u64,
 }
 
+#[cfg(not(feature = "runtime-debug-flags"))]
+#[inline(always)]
+pub(crate) fn trace_vram_write_config() -> Option<TraceVramWriteConfig> {
+    None
+}
+
+#[cfg(feature = "runtime-debug-flags")]
 pub(crate) fn trace_vram_write_config() -> Option<TraceVramWriteConfig> {
     static CFG: OnceLock<Option<TraceVramWriteConfig>> = OnceLock::new();
     *CFG.get_or_init(|| {
@@ -180,6 +208,13 @@ pub(crate) fn trace_vram_write_match(cfg: TraceVramWriteConfig, addr: u16, frame
         && addr <= cfg.end_addr
 }
 
+#[cfg(not(feature = "runtime-debug-flags"))]
+#[inline(always)]
+pub(crate) fn trace_cgram_write_config() -> Option<TraceCgramWriteConfig> {
+    None
+}
+
+#[cfg(feature = "runtime-debug-flags")]
 pub(crate) fn trace_cgram_write_config() -> Option<TraceCgramWriteConfig> {
     static CFG: OnceLock<Option<TraceCgramWriteConfig>> = OnceLock::new();
     *CFG.get_or_init(|| {
@@ -1388,25 +1423,19 @@ impl Ppu {
             // Ensure any pending brightness batch from the previous line is flushed.
             self.flush_brightness_simd();
         }
-        // Temporary: dump display state for specific frames
-        if x == 0 && y == 1 {
-            if let Ok(tf) = std::env::var("TRACE_DISP_FRAMES") {
-                let parts: Vec<u64> = tf.split(',').filter_map(|s| s.parse().ok()).collect();
-                if parts.contains(&self.frame) {
-                    eprintln!(
-                        "[DISP-STATE] frame={} INIDISP=0x{:02X} blank={} bright={} BGMODE={} TM=0x{:02X} NMI_en={} bg1h={} bg1v={}",
-                        self.frame,
-                        self.screen_display,
-                        (self.screen_display & 0x80) != 0,
-                        self.brightness,
-                        self.bg_mode,
-                        self.main_screen_designation,
-                        self.nmi_enabled,
-                        self.bg1_hscroll,
-                        self.bg1_vscroll,
-                    );
-                }
-            }
+        if x == 0 && y == 1 && crate::debug_flags::trace_disp_frame(self.frame) {
+            eprintln!(
+                "[DISP-STATE] frame={} INIDISP=0x{:02X} blank={} bright={} BGMODE={} TM=0x{:02X} NMI_en={} bg1h={} bg1v={}",
+                self.frame,
+                self.screen_display,
+                (self.screen_display & 0x80) != 0,
+                self.brightness,
+                self.bg_mode,
+                self.main_screen_designation,
+                self.nmi_enabled,
+                self.bg1_hscroll,
+                self.bg1_vscroll,
+            );
         }
         if x == 0 {
             if let Some(cfg) = trace_scanline_state_config() {

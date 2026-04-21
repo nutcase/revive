@@ -181,6 +181,7 @@ pub(in crate::emulator) struct FrameRunConfig {
     pub(in crate::emulator) max_iterations: u64,
     pub(in crate::emulator) stall_threshold: u32,
     pub(in crate::emulator) perf_verbose: bool,
+    pub(in crate::emulator) collect_timings: bool,
     pub(in crate::emulator) batch_exec: bool,
     pub(in crate::emulator) batch_max: u16,
     pub(in crate::emulator) trace_exec: bool,
@@ -193,31 +194,61 @@ pub(in crate::emulator) struct FrameRunConfig {
 
 impl FrameRunConfig {
     pub(in crate::emulator) fn from_env(frame_count: u32, fast_mode: bool) -> Self {
-        let tracing_heavy = std::env::var_os("TRACE_4210").is_some()
-            || std::env::var_os("WATCH_PC").is_some()
-            || std::env::var_os("WATCH_PC_FLOW").is_some()
-            || std::env::var_os("TRACE_BRANCH").is_some();
-        let default_max = if tracing_heavy {
-            50_000_000
-        } else if frame_count <= 3 {
-            5_000_000
-        } else {
-            1_000_000
-        };
+        #[cfg(not(feature = "runtime-debug-flags"))]
+        {
+            let default_max = if frame_count <= 3 {
+                5_000_000
+            } else {
+                1_000_000
+            };
 
-        Self {
-            max_iterations: EmulatorRuntimeConfig::read_u64_env("LOOP_GUARD_MAX", default_max),
-            stall_threshold: EmulatorRuntimeConfig::read_u32_env("TRACE_STALL", 0),
-            perf_verbose: EmulatorRuntimeConfig::read_strict_bool_env("PERF_VERBOSE", false),
-            batch_exec: EmulatorRuntimeConfig::read_strict_bool_env("CPU_BATCH", fast_mode),
-            batch_max: EmulatorRuntimeConfig::read_positive_u16_env("CPU_BATCH_MAX")
-                .unwrap_or(if fast_mode { 255 } else { 32 }),
-            trace_exec: EmulatorRuntimeConfig::read_strict_bool_env("TRACE_EXEC", false),
-            trace_pc_ffff: std::env::var_os("TRACE_PC_FFFF").is_some(),
-            trace_pc_frame: std::env::var_os("TRACE_PC_FRAME").is_some(),
-            trace_loop_cycles: std::env::var_os("TRACE_LOOP_CYCLES").is_some(),
-            trace_pc_ffff_once: std::env::var_os("TRACE_PC_FFFF_ONCE").is_some(),
-            smw_force_bbaa: crate::debug_flags::smw_force_bbaa(),
+            Self {
+                max_iterations: default_max,
+                stall_threshold: 0,
+                perf_verbose: false,
+                collect_timings: false,
+                batch_exec: fast_mode,
+                batch_max: if fast_mode { 255 } else { 32 },
+                trace_exec: false,
+                trace_pc_ffff: false,
+                trace_pc_frame: false,
+                trace_loop_cycles: false,
+                trace_pc_ffff_once: false,
+                smw_force_bbaa: crate::debug_flags::smw_force_bbaa(),
+            }
+        }
+
+        #[cfg(feature = "runtime-debug-flags")]
+        {
+            let tracing_heavy = std::env::var_os("TRACE_4210").is_some()
+                || std::env::var_os("WATCH_PC").is_some()
+                || std::env::var_os("WATCH_PC_FLOW").is_some()
+                || std::env::var_os("TRACE_BRANCH").is_some();
+            let default_max = if tracing_heavy {
+                50_000_000
+            } else if frame_count <= 3 {
+                5_000_000
+            } else {
+                1_000_000
+            };
+
+            let perf_verbose = EmulatorRuntimeConfig::read_strict_bool_env("PERF_VERBOSE", false);
+
+            Self {
+                max_iterations: EmulatorRuntimeConfig::read_u64_env("LOOP_GUARD_MAX", default_max),
+                stall_threshold: EmulatorRuntimeConfig::read_u32_env("TRACE_STALL", 0),
+                perf_verbose,
+                collect_timings: perf_verbose,
+                batch_exec: EmulatorRuntimeConfig::read_strict_bool_env("CPU_BATCH", fast_mode),
+                batch_max: EmulatorRuntimeConfig::read_positive_u16_env("CPU_BATCH_MAX")
+                    .unwrap_or(if fast_mode { 255 } else { 32 }),
+                trace_exec: EmulatorRuntimeConfig::read_strict_bool_env("TRACE_EXEC", false),
+                trace_pc_ffff: std::env::var_os("TRACE_PC_FFFF").is_some(),
+                trace_pc_frame: std::env::var_os("TRACE_PC_FRAME").is_some(),
+                trace_loop_cycles: std::env::var_os("TRACE_LOOP_CYCLES").is_some(),
+                trace_pc_ffff_once: std::env::var_os("TRACE_PC_FFFF_ONCE").is_some(),
+                smw_force_bbaa: crate::debug_flags::smw_force_bbaa(),
+            }
         }
     }
 }

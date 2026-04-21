@@ -67,11 +67,7 @@ fn trace_starfox_slow_profile_enabled() -> bool {
         std::env::var("PERF_VERBOSE")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false)
-            || std::env::var("TRACE_STARFOX_GUI_SLOW_MS")
-                .ok()
-                .and_then(|v| v.trim().parse::<u128>().ok())
-                .filter(|&ms| ms > 0)
-                .is_some()
+            || crate::debug_flags::trace_starfox_gui_slow_ms() > 0
             || std::env::var_os("STARFOX_DIAG_PERF").is_some()
     })
 }

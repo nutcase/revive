@@ -251,8 +251,7 @@ impl DmaController {
             0x420C => {
                 let old = self.hdma_enable;
                 self.hdma_enable = value;
-                // Temporary trace: log HDMAEN writes
-                if std::env::var_os("TRACE_HDMAEN").is_some() && value != old {
+                if debug_flags::trace_hdmaen() && value != old {
                     use std::sync::atomic::{AtomicU32, Ordering};
                     static CNT: std::sync::atomic::AtomicU32 = AtomicU32::new(0);
                     let n = CNT.fetch_add(1, Ordering::Relaxed);

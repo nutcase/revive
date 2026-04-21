@@ -699,14 +699,14 @@ impl Emulator {
     }
 
     fn run_frame(&mut self) {
-        let trace_slow_ms = std::env::var("TRACE_STARFOX_GUI_SLOW_MS")
-            .ok()
-            .and_then(|v| v.parse::<u128>().ok())
-            .filter(|v| *v > 0)
-            .unwrap_or(0);
-        let trace_starfox_run = self.rom_title().to_ascii_uppercase().contains("STAR FOX");
-        let trace_starfox_slow = trace_starfox_run && trace_slow_ms > 0;
-        let run_frame_wall_start = Instant::now();
+        let trace_slow_ms = crate::debug_flags::trace_starfox_gui_slow_ms();
+        let trace_starfox_slow =
+            trace_slow_ms > 0 && self.rom_title().to_ascii_uppercase().contains("STAR FOX");
+        let run_frame_wall_start = if trace_starfox_slow {
+            Some(Instant::now())
+        } else {
+            None
+        };
         if trace_starfox_slow {
             self.cpu.reset_step_profile();
             self.bus.reset_cpu_profile();
@@ -717,18 +717,23 @@ impl Emulator {
         // - non-interlace field=1 shortens V=240 by 1 dot
         // - interlace field=0 adds one extra scanline
         crate::cartridge::superfx::set_trace_superfx_exec_frame(self.frame_count.wrapping_add(1));
-        let sync_start = Instant::now();
+        let sync_start = if trace_starfox_slow {
+            Some(Instant::now())
+        } else {
+            None
+        };
         self.sync_superfx_direct_buffer();
-        timings.sync = sync_start.elapsed();
+        timings.sync = sync_start
+            .map(|start| start.elapsed())
+            .unwrap_or(Duration::ZERO);
         let cycles_per_frame = self.bus.get_ppu().remaining_master_cycles_in_frame();
         let start_cycles = self.master_cycles;
         let start_ppu_frame = self.bus.get_ppu().get_frame();
+        let frame_count = (self.frame_count.wrapping_add(1)) as u32;
 
         if self.bus.is_sa1_active() {
             self.bus.reset_sa1_cycle_accum();
         }
-
-        let frame_count = (self.frame_count.wrapping_add(1)) as u32;
 
         self.apply_frame_start_debug_controls(frame_count);
 
@@ -739,12 +744,17 @@ impl Emulator {
         // ・重いトレース有効時: 50,000,000 まで許容（WATCH_PC/TRACE_4210/TRACE_BRANCH など）
         // ・通常: 1,000,000
         // LOOP_GUARD_MAX を指定するとその値を上書きする（デバッグ用）。
-        let frame_config = FrameRunConfig::from_env(frame_count, self.fast_mode);
+        let mut frame_config = FrameRunConfig::from_env(frame_count, self.fast_mode);
+        frame_config.collect_timings |= trace_starfox_slow;
         let mut stall_trace = FrameStallTraceState::default();
 
         self.apply_frame_start_irq_controls(frame_count);
 
-        let main_loop_start = Instant::now();
+        let main_loop_start = if frame_config.collect_timings {
+            Some(Instant::now())
+        } else {
+            None
+        };
         while self.master_cycles - start_cycles < cycles_per_frame {
             loop_iterations += 1;
             self.enforce_frame_loop_guard(
@@ -793,14 +803,14 @@ impl Emulator {
             timings.ppu_step = timings.ppu_step.saturating_add(self.step_ppu_for_cpu_slice(
                 cpu_cycles,
                 extra_master,
-                frame_config.perf_verbose,
+                &frame_config,
             ));
             timings.apu_inline = timings
                 .apu_inline
                 .saturating_add(self.step_apu_for_cpu_slice(
                     cpu_cycles,
                     extra_master,
-                    frame_config.perf_verbose,
+                    &frame_config,
                 ));
 
             // NMI/IRQ は CPU 側の poll_nmi/service_nmi/service_irq で処理する。
@@ -818,8 +828,11 @@ impl Emulator {
                 return;
             }
         }
-        timings.main_loop = main_loop_start.elapsed();
-        timings.catchup = self.finish_frame_boundary_catchup(start_ppu_frame);
+        timings.main_loop = main_loop_start
+            .map(|start| start.elapsed())
+            .unwrap_or(Duration::ZERO);
+        timings.catchup =
+            self.finish_frame_boundary_catchup(start_ppu_frame, frame_config.collect_timings);
 
         if self.maybe_save_state_at_frame_anchor() {
             return;
@@ -831,8 +844,10 @@ impl Emulator {
         // Frame完了時に主要レジスタのサマリを出力（デバッグ用）
         self.maybe_dump_register_summary(frame_count);
 
-        timings.audio = self.mix_frame_audio();
-        let total_time = run_frame_wall_start.elapsed();
+        timings.audio = self.mix_frame_audio(frame_config.collect_timings);
+        let total_time = run_frame_wall_start
+            .map(|start| start.elapsed())
+            .unwrap_or(Duration::ZERO);
         self.maybe_log_starfox_slow_frame(trace_starfox_slow, trace_slow_ms, &timings, total_time);
     }
 

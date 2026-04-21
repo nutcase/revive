@@ -218,6 +218,11 @@ debug_flag!(dma, "DEBUG_DMA", false);
 debug_flag!(dma_reg, "DEBUG_DMA_REG", false);
 debug_flag_present!(trace_starfox_boot, "TRACE_STARFOX_BOOT");
 debug_flag!(trace_apu_port_all, "TRACE_APU_PORT_ALL", false);
+debug_flag_present!(trace_hdmaen, "TRACE_HDMAEN");
+debug_u32!(nmi_guard_frames, "NMI_GUARD_FRAMES", 0);
+debug_flag_present!(show_pc, "SHOW_PC");
+debug_flag_present!(debug_cpu_flags, "DEBUG_CPU_FLAGS");
+debug_u32!(force_cli_frames, "FORCE_CLI_FRAMES", 0);
 debug_flag!(trace_apu_port0, "TRACE_APU_PORT0", false);
 debug_flag!(cpu_test_hle, "CPUTEST_HLE", false);
 debug_flag!(cpu_test_hle_strict_vblank, "CPUTEST_HLE_STRICT_VBL", false);
@@ -484,6 +489,237 @@ pub fn trace_scroll_frame() -> Option<u64> {
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
     })
+}
+
+#[cfg(all(not(feature = "runtime-debug-flags"), not(test)))]
+#[inline(always)]
+pub fn trace_disp_frame(_frame: u64) -> bool {
+    false
+}
+
+#[cfg(all(feature = "runtime-debug-flags", not(test)))]
+pub fn trace_disp_frame(frame: u64) -> bool {
+    static FRAMES: OnceLock<Vec<u64>> = OnceLock::new();
+    FRAMES
+        .get_or_init(|| {
+            std::env::var("TRACE_DISP_FRAMES")
+                .ok()
+                .map(|value| {
+                    value
+                        .split(',')
+                        .filter_map(|s| s.trim().parse::<u64>().ok())
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .contains(&frame)
+}
+
+#[cfg(test)]
+pub fn trace_disp_frame(frame: u64) -> bool {
+    std::env::var("TRACE_DISP_FRAMES")
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .filter_map(|s| s.trim().parse::<u64>().ok())
+                .any(|value| value == frame)
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(all(not(feature = "runtime-debug-flags"), not(test)))]
+#[inline(always)]
+pub fn trace_starfox_gui_slow_ms() -> u128 {
+    0
+}
+
+#[cfg(all(feature = "runtime-debug-flags", not(test)))]
+pub fn trace_starfox_gui_slow_ms() -> u128 {
+    static VALUE: OnceLock<u128> = OnceLock::new();
+    *VALUE.get_or_init(|| {
+        std::env::var("TRACE_STARFOX_GUI_SLOW_MS")
+            .ok()
+            .and_then(|value| value.parse::<u128>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(0)
+    })
+}
+
+#[cfg(test)]
+pub fn trace_starfox_gui_slow_ms() -> u128 {
+    std::env::var("TRACE_STARFOX_GUI_SLOW_MS")
+        .ok()
+        .and_then(|value| value.parse::<u128>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(0)
+}
+
+#[cfg(all(not(feature = "runtime-debug-flags"), not(test)))]
+#[inline(always)]
+pub fn trace_nmi_state_range() -> Option<(u64, u64)> {
+    None
+}
+
+#[cfg(all(feature = "runtime-debug-flags", not(test)))]
+pub fn trace_nmi_state_range() -> Option<(u64, u64)> {
+    static RANGE: OnceLock<Option<(u64, u64)>> = OnceLock::new();
+    *RANGE.get_or_init(|| {
+        let value = std::env::var("TRACE_NMI_STATE").ok()?;
+        let (start, end) = value.split_once('-')?;
+        Some((start.parse().ok()?, end.parse().ok()?))
+    })
+}
+
+#[cfg(test)]
+pub fn trace_nmi_state_range() -> Option<(u64, u64)> {
+    let value = std::env::var("TRACE_NMI_STATE").ok()?;
+    let (start, end) = value.split_once('-')?;
+    Some((start.parse().ok()?, end.parse().ok()?))
+}
+
+#[cfg(all(not(feature = "runtime-debug-flags"), not(test)))]
+#[inline(always)]
+pub fn boot_force_unblank_config() -> Option<(bool, u64, u64)> {
+    None
+}
+
+#[cfg(all(feature = "runtime-debug-flags", not(test)))]
+pub fn boot_force_unblank_config() -> Option<(bool, u64, u64)> {
+    static CFG: OnceLock<Option<(bool, u64, u64)>> = OnceLock::new();
+    *CFG.get_or_init(|| {
+        let enabled = std::env::var("BOOT_FORCE_UNBLANK")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if !enabled {
+            return None;
+        }
+        let force_always = std::env::var("BOOT_FORCE_UNBLANK_ALWAYS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let from = std::env::var("BOOT_FORCE_UNBLANK_FROM")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(50);
+        let to = std::env::var("BOOT_FORCE_UNBLANK_TO")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(1000);
+        Some((force_always, from, to))
+    })
+}
+
+#[cfg(test)]
+pub fn boot_force_unblank_config() -> Option<(bool, u64, u64)> {
+    let enabled = std::env::var("BOOT_FORCE_UNBLANK")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if !enabled {
+        return None;
+    }
+    let force_always = std::env::var("BOOT_FORCE_UNBLANK_ALWAYS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let from = std::env::var("BOOT_FORCE_UNBLANK_FROM")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(50);
+    let to = std::env::var("BOOT_FORCE_UNBLANK_TO")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(1000);
+    Some((force_always, from, to))
+}
+
+#[cfg(all(not(feature = "runtime-debug-flags"), not(test)))]
+#[inline(always)]
+pub fn compat_auto_unblank_config() -> Option<(bool, bool, u64)> {
+    None
+}
+
+#[cfg(all(feature = "runtime-debug-flags", not(test)))]
+pub fn compat_auto_unblank_config() -> Option<(bool, bool, u64)> {
+    static CFG: OnceLock<Option<(bool, bool, u64)>> = OnceLock::new();
+    *CFG.get_or_init(|| {
+        let trace = std::env::var("TRACE_AUTO_UNBLANK")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let enabled = std::env::var("COMPAT_BOOT_FALLBACK")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if !enabled && !trace {
+            return None;
+        }
+        let threshold = std::env::var("COMPAT_AUTO_UNBLANK_FRAME")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(120);
+        Some((enabled, trace, threshold))
+    })
+}
+
+#[cfg(test)]
+pub fn compat_auto_unblank_config() -> Option<(bool, bool, u64)> {
+    let trace = std::env::var("TRACE_AUTO_UNBLANK")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let enabled = std::env::var("COMPAT_BOOT_FALLBACK")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if !enabled && !trace {
+        return None;
+    }
+    let threshold = std::env::var("COMPAT_AUTO_UNBLANK_FRAME")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(120);
+    Some((enabled, trace, threshold))
+}
+
+#[cfg(all(not(feature = "runtime-debug-flags"), not(test)))]
+#[inline(always)]
+pub fn compat_inject_min_palette() -> bool {
+    false
+}
+
+#[cfg(all(feature = "runtime-debug-flags", not(test)))]
+pub fn compat_inject_min_palette() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("COMPAT_INJECT_MIN_PALETTE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    })
+}
+
+#[cfg(test)]
+pub fn compat_inject_min_palette() -> bool {
+    std::env::var("COMPAT_INJECT_MIN_PALETTE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+#[cfg(all(not(feature = "runtime-debug-flags"), not(test)))]
+#[inline(always)]
+pub fn compat_periodic_min_palette() -> bool {
+    false
+}
+
+#[cfg(all(feature = "runtime-debug-flags", not(test)))]
+pub fn compat_periodic_min_palette() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("COMPAT_PERIODIC_MIN_PALETTE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    })
+}
+
+#[cfg(test)]
+pub fn compat_periodic_min_palette() -> bool {
+    std::env::var("COMPAT_PERIODIC_MIN_PALETTE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
 }
 
 // Force APU port0/1 to fixed values (HLE debug: APU_PORT0_VAL/APU_PORT1_VAL)

@@ -38,11 +38,7 @@ fn trace_starfox_slow_profile_enabled() -> bool {
         std::env::var("PERF_VERBOSE")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false)
-            || std::env::var("TRACE_STARFOX_GUI_SLOW_MS")
-                .ok()
-                .and_then(|v| v.trim().parse::<u128>().ok())
-                .filter(|&ms| ms > 0)
-                .is_some()
+            || debug_flags::trace_starfox_gui_slow_ms() > 0
             || std::env::var_os("STARFOX_DIAG_PERF").is_some()
     })
 }
@@ -650,6 +646,11 @@ impl Bus {
         })
     }
 
+    #[cfg(not(feature = "runtime-debug-flags"))]
+    #[inline(always)]
+    fn trace_ppu_reg_write(&self, _reg: u8, _value: u8) {}
+
+    #[cfg(feature = "runtime-debug-flags")]
     #[cold]
     #[inline(never)]
     fn trace_ppu_reg_write(&self, reg: u8, value: u8) {
@@ -677,6 +678,11 @@ impl Bus {
         );
     }
 
+    #[cfg(not(feature = "runtime-debug-flags"))]
+    #[inline(always)]
+    fn trace_wram_abs_write(&self, _source: &str, _abs: u32, _value: u8) {}
+
+    #[cfg(feature = "runtime-debug-flags")]
     #[cold]
     #[inline(never)]
     fn trace_wram_abs_write(&self, source: &str, abs: u32, value: u8) {
@@ -7743,30 +7749,26 @@ impl CpuBus for Bus {
         // Clear the latched NMI flag so we don't immediately retrigger.
         self.ppu.clear_nmi();
 
-        // Temporary: trace NMI + game state during transition period
-        if let Ok(range) = std::env::var("TRACE_NMI_STATE") {
-            let parts: Vec<u64> = range.split('-').filter_map(|s| s.parse().ok()).collect();
-            if parts.len() == 2 {
-                let frame = self.ppu.get_frame();
-                if frame >= parts[0] && frame <= parts[1] {
-                    let w30 = self.wram[0x30];
-                    let w8c = self.wram[0x8C];
-                    let inidisp = self.ppu.screen_display;
-                    let bgmode = self.ppu.bg_mode;
-                    let tm = self.ppu.main_screen_designation;
-                    let _ts = self.ppu.sub_screen_designation;
-                    let hdma = self.dma_controller.hdma_enable;
-                    let pc = self.last_cpu_pc;
-                    let sub_major = self.wram[0x0180];
-                    let sub_minor = self.wram[0x0181];
-                    let w1d9 = self.wram[0x01D9];
-                    let w1da = self.wram[0x01DA];
-                    let w1e1 = self.wram[0x01E1];
-                    eprintln!(
-                        "[NMI-STATE] frame={} PC={:06X} $30={:02X} $8C={:02X} INIDISP={:02X} BG={} TM={:02X} HDMA={:02X} sub={:02X}/{:02X} D9={:02X} DA={:02X} E1={:02X}",
-                        frame, pc, w30, w8c, inidisp, bgmode, tm, hdma, sub_major, sub_minor, w1d9, w1da, w1e1
-                    );
-                }
+        if let Some((start, end)) = crate::debug_flags::trace_nmi_state_range() {
+            let frame = self.ppu.get_frame();
+            if frame >= start && frame <= end {
+                let w30 = self.wram[0x30];
+                let w8c = self.wram[0x8C];
+                let inidisp = self.ppu.screen_display;
+                let bgmode = self.ppu.bg_mode;
+                let tm = self.ppu.main_screen_designation;
+                let _ts = self.ppu.sub_screen_designation;
+                let hdma = self.dma_controller.hdma_enable;
+                let pc = self.last_cpu_pc;
+                let sub_major = self.wram[0x0180];
+                let sub_minor = self.wram[0x0181];
+                let w1d9 = self.wram[0x01D9];
+                let w1da = self.wram[0x01DA];
+                let w1e1 = self.wram[0x01E1];
+                eprintln!(
+                    "[NMI-STATE] frame={} PC={:06X} $30={:02X} $8C={:02X} INIDISP={:02X} BG={} TM={:02X} HDMA={:02X} sub={:02X}/{:02X} D9={:02X} DA={:02X} E1={:02X}",
+                    frame, pc, w30, w8c, inidisp, bgmode, tm, hdma, sub_major, sub_minor, w1d9, w1da, w1e1
+                );
             }
         }
     }

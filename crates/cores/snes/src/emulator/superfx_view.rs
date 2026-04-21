@@ -431,6 +431,16 @@ impl Emulator {
     }
 
     pub(super) fn sync_superfx_direct_buffer(&mut self) {
+        #[cfg(not(test))]
+        if !self.bus.is_superfx_active() {
+            let ppu = self.bus.get_ppu_mut();
+            ppu.clear_superfx_tile_buffer();
+            ppu.clear_superfx_direct_buffer();
+            ppu.superfx_bypass_bg1_window = false;
+            ppu.set_superfx_authoritative_bg1_source(false);
+            return;
+        }
+
         let tile_buffer = if Self::superfx_tile_use_stop_snapshot() {
             self.bus.superfx_screen_buffer_display_snapshot()
         } else {
