@@ -1,7 +1,7 @@
 use crate::vdc::{
-    FRAME_HEIGHT, FRAME_WIDTH, SPRITE_COUNT, SPRITE_PATTERN_HEIGHT, SPRITE_PATTERN_WIDTH,
+    Vdc, FRAME_HEIGHT, FRAME_WIDTH, SPRITE_COUNT, SPRITE_PATTERN_HEIGHT, SPRITE_PATTERN_WIDTH,
     SPRITE_PATTERN_WORDS, TILE_HEIGHT, TILE_WIDTH, VDC_CTRL_ENABLE_BACKGROUND_LEGACY,
-    VDC_CTRL_ENABLE_SPRITES_LEGACY, VDC_STATUS_OR, Vdc,
+    VDC_CTRL_ENABLE_SPRITES_LEGACY, VDC_STATUS_OR,
 };
 
 use super::Bus;
@@ -168,8 +168,6 @@ impl Bus {
             }
         }
         if background_line_enabled.iter().any(|&enabled| enabled) {
-            let mut tile_cache: Vec<TileSample> =
-                Vec::with_capacity((display_width / TILE_WIDTH) + 2);
             let (map_width_tiles, map_height_tiles) = self.vdc.map_dimensions();
             let map_width = Self::env_bg_map_width_override()
                 .unwrap_or(map_width_tiles)
@@ -242,82 +240,70 @@ impl Bus {
                 };
                 let tile_row = (sample_y / TILE_HEIGHT) % map_height;
                 let line_in_tile = (sample_y % TILE_HEIGHT) as usize;
-                let start_sample_x = start_x_fp >> 4;
-                let start_tile_int = start_sample_x / TILE_WIDTH;
-                let end_sample_x_fp = start_x_fp + step_x * (line_display_width - 1);
-                let end_sample_x = (end_sample_x_fp >> 4) + 1;
-                let end_tile_int = (end_sample_x + TILE_WIDTH - 1) / TILE_WIDTH;
-                let mut tiles_needed = end_tile_int.saturating_sub(start_tile_int) + 2;
-                tiles_needed = tiles_needed.max(1);
-
-                tile_cache.clear();
-                tile_cache.reserve(tiles_needed);
-
-                for tile_offset in 0..tiles_needed {
-                    let tile_col = (start_tile_int + tile_offset) % map_width;
-                    let map_addr = {
-                        let raw = self.vdc.map_entry_address(tile_row, tile_col) as i32
-                            + Self::env_bg_map_base_bias();
-                        raw.rem_euclid(self.vdc.vram.len() as i32) as usize
-                    };
-                    let tile_entry = vram.get(map_addr & vram_mask).copied().unwrap_or(0);
-                    let tile_mask = if Self::env_bg_tile12() {
-                        0x0FFF
-                    } else {
-                        0x07FF
-                    };
-                    let tile_id = (tile_entry & tile_mask) as usize;
-                    let palette_bank = ((tile_entry >> 12) & 0x0F) as usize;
-                    let tile_base = ((tile_id as i32 * 16 + Self::env_bg_tile_base_bias())
-                        .rem_euclid(self.vdc.vram.len() as i32))
-                        as usize;
-                    let row_index = line_in_tile;
-                    let (row_addr_a, row_addr_b) = if Self::env_bg_row_words() {
-                        let a = (tile_base + row_index * 2) & vram_mask;
-                        (a, (a + 1) & vram_mask)
-                    } else {
-                        let a = (tile_base + row_index) & vram_mask;
-                        (a, (a + 8) & vram_mask)
-                    };
-                    let mut chr_a = vram.get(row_addr_a).copied().unwrap_or(0);
-                    let mut chr_b = vram.get(row_addr_b).copied().unwrap_or(0);
-                    if swap_words {
-                        std::mem::swap(&mut chr_a, &mut chr_b);
-                    }
-                    if Self::env_bg_force_chr0_only() {
-                        chr_b = 0;
-                    }
-                    if Self::env_bg_force_chr1_only() {
-                        chr_a = 0;
-                    }
-                    if Self::env_bg_force_tile0_zero() && tile_id == 0 {
-                        chr_a = 0;
-                        chr_b = 0;
-                    }
-                    if restrict_planes {
-                        if cg_mode_bit == 0 {
-                            chr_b = 0;
-                        } else {
-                            chr_a = 0;
-                        }
-                    }
-                    tile_cache.push(TileSample {
-                        chr0: chr_a,
-                        chr1: chr_b,
-                        tile_base,
-                        palette_base: (palette_bank << 4) & 0x1F0,
-                        priority: !Self::env_bg_tile12() && (tile_entry & 0x0800) != 0,
-                    });
-                }
-
                 let mut sample_x_fp = start_x_fp;
-                let start_tile_int = start_tile_int;
+                let mut cached_tile_idx_int = usize::MAX;
+                let mut sample = TileSample::default();
                 for x in 0..line_display_width {
                     let screen_index = y * FRAME_WIDTH + line_display_start + x;
                     let sample_x = (sample_x_fp >> 4) as usize;
                     let tile_idx_int = sample_x / TILE_WIDTH;
-                    let tile_offset = tile_idx_int.saturating_sub(start_tile_int);
-                    let sample = tile_cache.get(tile_offset).copied().unwrap_or_default();
+                    if tile_idx_int != cached_tile_idx_int {
+                        cached_tile_idx_int = tile_idx_int;
+                        let tile_col = tile_idx_int % map_width;
+                        let map_addr = {
+                            let raw = self.vdc.map_entry_address(tile_row, tile_col) as i32
+                                + Self::env_bg_map_base_bias();
+                            raw.rem_euclid(self.vdc.vram.len() as i32) as usize
+                        };
+                        let tile_entry = vram.get(map_addr & vram_mask).copied().unwrap_or(0);
+                        let tile_mask = if Self::env_bg_tile12() {
+                            0x0FFF
+                        } else {
+                            0x07FF
+                        };
+                        let tile_id = (tile_entry & tile_mask) as usize;
+                        let palette_bank = ((tile_entry >> 12) & 0x0F) as usize;
+                        let tile_base = ((tile_id as i32 * 16 + Self::env_bg_tile_base_bias())
+                            .rem_euclid(self.vdc.vram.len() as i32))
+                            as usize;
+                        let row_index = line_in_tile;
+                        let (row_addr_a, row_addr_b) = if Self::env_bg_row_words() {
+                            let a = (tile_base + row_index * 2) & vram_mask;
+                            (a, (a + 1) & vram_mask)
+                        } else {
+                            let a = (tile_base + row_index) & vram_mask;
+                            (a, (a + 8) & vram_mask)
+                        };
+                        let mut chr_a = vram.get(row_addr_a).copied().unwrap_or(0);
+                        let mut chr_b = vram.get(row_addr_b).copied().unwrap_or(0);
+                        if swap_words {
+                            std::mem::swap(&mut chr_a, &mut chr_b);
+                        }
+                        if Self::env_bg_force_chr0_only() {
+                            chr_b = 0;
+                        }
+                        if Self::env_bg_force_chr1_only() {
+                            chr_a = 0;
+                        }
+                        if Self::env_bg_force_tile0_zero() && tile_id == 0 {
+                            chr_a = 0;
+                            chr_b = 0;
+                        }
+                        if restrict_planes {
+                            if cg_mode_bit == 0 {
+                                chr_b = 0;
+                            } else {
+                                chr_a = 0;
+                            }
+                        }
+                        sample = TileSample {
+                            chr0: chr_a,
+                            chr1: chr_b,
+                            tile_base,
+                            palette_base: (palette_bank << 4) & 0x1F0,
+                            priority: !Self::env_bg_tile12() && (tile_entry & 0x0800) != 0,
+                        };
+                    }
                     let intra_tile_x = sample_x % TILE_WIDTH;
                     let bit_index = intra_tile_x;
                     let shift = if bit_lsb { bit_index } else { 7 - bit_index };
@@ -446,7 +432,7 @@ impl Bus {
         if self.vdc.vram.is_empty() {
             return;
         }
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, Default)]
         struct LineSprite {
             x: i32,
             visible_width: usize,
@@ -480,7 +466,8 @@ impl Bus {
                 continue;
             };
             let line_display_start = line_display_starts[dest_row] as i32;
-            let mut line_sprites = Vec::with_capacity(16);
+            let mut line_sprites = [LineSprite::default(); SPRITE_COUNT];
+            let mut line_sprite_count = 0usize;
             let mut slots_used = 0u8;
             let scanline_y = active_row as i32;
 
@@ -557,18 +544,21 @@ impl Bus {
                 let src_tile_y = src_y / SPRITE_PATTERN_HEIGHT;
                 let row_in_tile = src_y % SPRITE_PATTERN_HEIGHT;
 
-                line_sprites.push(LineSprite {
-                    x,
-                    visible_width: full_width,
-                    full_width,
-                    src_tile_y,
-                    row_in_tile,
-                    pattern_base_index,
-                    palette_base: 0x100usize | (((attr_word & 0x000F) as usize) << 4),
-                    high_priority: (attr_word & 0x0080) != 0,
-                    h_flip: (attr_word & 0x0800) != 0,
-                    use_upper_cg_pair: (pattern_word & 0x0001) != 0,
-                });
+                if line_sprite_count < line_sprites.len() {
+                    line_sprites[line_sprite_count] = LineSprite {
+                        x,
+                        visible_width: full_width,
+                        full_width,
+                        src_tile_y,
+                        row_in_tile,
+                        pattern_base_index,
+                        palette_base: 0x100usize | (((attr_word & 0x000F) as usize) << 4),
+                        high_priority: (attr_word & 0x0080) != 0,
+                        h_flip: (attr_word & 0x0800) != 0,
+                        use_upper_cg_pair: (pattern_word & 0x0001) != 0,
+                    };
+                    line_sprite_count += 1;
+                }
             }
 
             self.sprite_line_counts[dest_row] = slots_used;
@@ -578,7 +568,7 @@ impl Bus {
             let line_display_end = line_display_start + line_display_width;
             for screen_x in line_display_start..line_display_end {
                 let offset = dest_row * FRAME_WIDTH + screen_x;
-                for sprite in line_sprites.iter() {
+                for sprite in line_sprites[..line_sprite_count].iter() {
                     if (screen_x as i32) < sprite.x
                         || (screen_x as i32) >= sprite.x + sprite.visible_width as i32
                     {

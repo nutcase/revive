@@ -468,6 +468,8 @@ fn run_sdl_loop(
 
         if let Some(queue) = audio_queue.as_mut() {
             feed_audio(queue, &mut core, &mut audio_scratch)?;
+        } else {
+            core.drain_audio_i16(&mut audio_scratch);
         }
 
         {

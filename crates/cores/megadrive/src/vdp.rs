@@ -105,6 +105,16 @@ struct PlaneSample {
     priority_high: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct PlaneTileCache {
+    valid: bool,
+    tile_x: usize,
+    sample_y: usize,
+    color_base: usize,
+    priority_high: bool,
+    pixels: [u8; 8],
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, bincode::Encode, bincode::Decode)]
 pub enum VideoStandard {
     Ntsc,
@@ -136,17 +146,24 @@ impl<T> std::ops::DerefMut for ScratchBuf<T> {
     }
 }
 impl<T> bincode::Encode for ScratchBuf<T> {
-    fn encode<E: bincode::enc::Encoder>(&self, _encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        _encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
         Ok(())
     }
 }
 impl<C, T> bincode::Decode<C> for ScratchBuf<T> {
-    fn decode<D: bincode::de::Decoder<Context = C>>(_decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
+    fn decode<D: bincode::de::Decoder<Context = C>>(
+        _decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
         Ok(ScratchBuf(Vec::new()))
     }
 }
 impl<'de, C, T> bincode::BorrowDecode<'de, C> for ScratchBuf<T> {
-    fn borrow_decode<D: bincode::de::BorrowDecoder<'de, Context = C>>(_decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
+    fn borrow_decode<D: bincode::de::BorrowDecoder<'de, Context = C>>(
+        _decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
         Ok(ScratchBuf(Vec::new()))
     }
 }
@@ -413,7 +430,8 @@ impl Vdp {
     /// Whether the given absolute frame cycle falls in a blanking period
     /// (VBlank or HBlank).
     fn is_blanking_at(&self, cycle: u64) -> bool {
-        let line = self.line_index_for_cycle(cycle)
+        let line = self
+            .line_index_for_cycle(cycle)
             .min(self.total_lines().saturating_sub(1) as u64) as usize;
         if line >= self.active_display_height() {
             return true; // vblank
@@ -433,7 +451,11 @@ impl Vdp {
     /// when a data port write occurred.  Returns 0 if not full.
     pub fn fifo_wait_cycles(&self) -> u32 {
         if self.fifo_count >= 4 {
-            let drain_interval: u64 = if self.is_blanking_at(self.frame_cycles) { 8 } else { 18 };
+            let drain_interval: u64 = if self.is_blanking_at(self.frame_cycles) {
+                8
+            } else {
+                18
+            };
             // Account for cycles already accumulated toward the next drain
             drain_interval.saturating_sub(self.fifo_drain_carry) as u32
         } else {
@@ -455,7 +477,11 @@ impl Vdp {
         let mut consumed = 0u64;
         while self.fifo_count > 0 {
             let drain_cycle = window_start + consumed;
-            let drain_interval: u64 = if self.is_blanking_at(drain_cycle) { 8 } else { 18 };
+            let drain_interval: u64 = if self.is_blanking_at(drain_cycle) {
+                8
+            } else {
+                18
+            };
             if self.fifo_drain_carry < drain_interval {
                 break;
             }
@@ -996,7 +1022,11 @@ impl Vdp {
     fn dma_length(&self) -> usize {
         let len = ((self.registers[REG_DMA_LENGTH_HIGH] as usize) << 8)
             | self.registers[REG_DMA_LENGTH_LOW] as usize;
-        if len == 0 { 0x10000 } else { len }
+        if len == 0 {
+            0x10000
+        } else {
+            len
+        }
     }
 
     fn clear_dma_length(&mut self) {
@@ -1344,8 +1374,11 @@ impl Vdp {
         }
     }
 
-    fn sample_plane_pixel(
+    #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
+    fn sample_plane_pixel_cached(
         &self,
+        cache: &mut PlaneTileCache,
         vram: &[u8; VRAM_SIZE],
         base: usize,
         sample_x: usize,
@@ -1361,62 +1394,75 @@ impl Vdp {
     ) -> (Option<PlaneSample>, bool) {
         let tile_x = (sample_x / 8) % plane_width_tiles.max(1);
         let tile_y = (sample_y / 8) % plane_height_tiles.max(1);
-        let mut in_tile_x = sample_x & 7;
-        let mut in_tile_y = sample_y & 7;
+        let in_tile_x = sample_x & 7;
 
-        let name_addr = if scroll_plane_layout {
-            self.scroll_plane_name_addr(
-                base,
-                tile_x,
-                tile_y,
-                plane_width_tiles,
-                plane_height_tiles,
-                use_64x32_paged_layout,
-                plane_paged_layout,
-                plane_paged_xmajor,
-            )
-        } else {
-            base + (tile_y * plane_width_tiles + tile_x) * 2
-        };
-        let entry = read_u16_be_wrapped(vram, name_addr);
-        let tile_index = (entry & 0x07FF) as usize;
-        let palette_line = ((entry >> 13) & 0x3) as usize;
-        let priority_high = (entry & 0x8000) != 0;
-        let hflip = (entry & 0x0800) != 0;
-        let vflip = (entry & 0x1000) != 0;
-        if hflip {
-            in_tile_x = 7 - in_tile_x;
-        }
-        if vflip {
-            in_tile_y = 7 - in_tile_y;
+        if !cache.valid || cache.tile_x != tile_x || cache.sample_y != sample_y {
+            let name_addr = if scroll_plane_layout {
+                self.scroll_plane_name_addr(
+                    base,
+                    tile_x,
+                    tile_y,
+                    plane_width_tiles,
+                    plane_height_tiles,
+                    use_64x32_paged_layout,
+                    plane_paged_layout,
+                    plane_paged_xmajor,
+                )
+            } else {
+                base + (tile_y * plane_width_tiles + tile_x) * 2
+            };
+            let entry = read_u16_be_wrapped(vram, name_addr);
+            let tile_index = (entry & 0x07FF) as usize;
+            let palette_line = ((entry >> 13) & 0x3) as usize;
+            let priority_high = (entry & 0x8000) != 0;
+            let hflip = (entry & 0x0800) != 0;
+            let vflip = (entry & 0x1000) != 0;
+            let mut row_in_tile = sample_y & 7;
+            if vflip {
+                row_in_tile = 7 - row_in_tile;
+            }
+
+            let tile_stride = if interlace_mode_2 {
+                TILE_SIZE_BYTES * 2
+            } else {
+                TILE_SIZE_BYTES
+            };
+            let row_in_tile = if interlace_mode_2 {
+                (row_in_tile << 1) | (interlace_field & 1)
+            } else {
+                row_in_tile
+            };
+            let tile_row_addr = tile_index * tile_stride + row_in_tile * 4;
+            for dst_x in 0..8 {
+                let src_x = if hflip { 7 - dst_x } else { dst_x };
+                let tile_byte = vram[(tile_row_addr + src_x / 2) % VRAM_SIZE];
+                cache.pixels[dst_x] = if src_x & 1 == 0 {
+                    tile_byte >> 4
+                } else {
+                    tile_byte & 0x0F
+                };
+            }
+
+            cache.valid = true;
+            cache.tile_x = tile_x;
+            cache.sample_y = sample_y;
+            cache.color_base = palette_line * 16;
+            cache.priority_high = priority_high;
         }
 
-        let tile_stride = if interlace_mode_2 {
-            TILE_SIZE_BYTES * 2
-        } else {
-            TILE_SIZE_BYTES
-        };
-        let in_tile_y = if interlace_mode_2 {
-            (in_tile_y << 1) | (interlace_field & 1)
-        } else {
-            in_tile_y
-        };
-        let tile_addr = tile_index * tile_stride + in_tile_y * 4 + in_tile_x / 2;
-        let tile_byte = vram[tile_addr % VRAM_SIZE];
-        let pixel = if in_tile_x & 1 == 0 {
-            tile_byte >> 4
-        } else {
-            tile_byte & 0x0F
-        };
+        let pixel = cache.pixels[in_tile_x];
         if pixel == 0 {
-            return (None, priority_high);
+            return (None, cache.priority_high);
         }
 
-        (Some(PlaneSample {
-            color_index: palette_line * 16 + pixel as usize,
-            opaque: true,
-            priority_high,
-        }), priority_high)
+        (
+            Some(PlaneSample {
+                color_index: cache.color_base + pixel as usize,
+                opaque: true,
+                priority_high: cache.priority_high,
+            }),
+            cache.priority_high,
+        )
     }
 
     fn scroll_plane_name_addr(
@@ -1554,8 +1600,7 @@ impl Vdp {
     fn plane_b_hscroll_overlap_pixel_row(regs: &[u8; REG_COUNT]) -> Option<usize> {
         let plane_b_base = Self::plane_b_nametable_base_from_regs(regs);
         let hscroll_base = Self::hscroll_table_base_from_regs(regs);
-        let (plane_width_tiles, plane_height_tiles) =
-            Self::plane_tile_dimensions_from_regs(regs);
+        let (plane_width_tiles, plane_height_tiles) = Self::plane_tile_dimensions_from_regs(regs);
         if plane_width_tiles == 0 {
             return None;
         }
@@ -1592,18 +1637,13 @@ impl Vdp {
         let invert_vscroll_b = debug_flags::invert_vscroll_b();
         let debug_swap_vscroll_ab = debug_flags::vscroll_swap_ab();
         let plane_paged_layout = debug_flags::plane_paged();
-        let plane_paged_layout_a =
-            plane_paged_layout || debug_flags::plane_a_paged();
-        let plane_paged_layout_b =
-            plane_paged_layout || debug_flags::plane_b_paged();
+        let plane_paged_layout_a = plane_paged_layout || debug_flags::plane_a_paged();
+        let plane_paged_layout_b = plane_paged_layout || debug_flags::plane_b_paged();
         let plane_paged_xmajor = debug_flags::plane_paged_xmajor();
-        let plane_paged_xmajor_a = plane_paged_xmajor
-            || debug_flags::plane_a_paged_xmajor();
-        let plane_paged_xmajor_b = plane_paged_xmajor
-            || debug_flags::plane_b_paged_xmajor();
+        let plane_paged_xmajor_a = plane_paged_xmajor || debug_flags::plane_a_paged_xmajor();
+        let plane_paged_xmajor_b = plane_paged_xmajor || debug_flags::plane_b_paged_xmajor();
         let force_plane_live_vram = debug_flags::plane_live_vram();
-        let use_plane_line_latch = self.line_vram_latch_enabled
-            && debug_flags::plane_line_latch();
+        let use_plane_line_latch = self.line_vram_latch_enabled && debug_flags::plane_line_latch();
         let live_cram = debug_flags::live_cram();
         let line_offset = debug_flags::line_offset();
         let bottom_bg_mask = debug_flags::bottom_bg_mask();
@@ -1615,8 +1655,7 @@ impl Vdp {
         let debug_plane_b_64x32_paged = debug_flags::plane_b_64x32_paged();
         let disable_comix_roll_fix = debug_flags::disable_comix_roll_fix();
         let comix_roll_offset = debug_flags::comix_roll_y();
-        let disable_comix_roll_sparse_mask =
-            debug_flags::disable_comix_roll_sparse_mask();
+        let disable_comix_roll_sparse_mask = debug_flags::disable_comix_roll_sparse_mask();
         let ignore_plane_priority = debug_flags::ignore_plane_priority();
         let mut plane_meta = std::mem::take(&mut self.render_plane_meta);
         if plane_meta.len() != FRAME_WIDTH * FRAME_HEIGHT {
@@ -1651,12 +1690,11 @@ impl Vdp {
             } else {
                 self.line_cram.get(line_idx).copied().unwrap_or(self.cram)
             };
-            let vram =
-                if use_plane_line_latch && !force_plane_live_vram {
-                    self.line_vram.get(line_idx).unwrap_or(&self.vram)
-                } else {
-                    &self.vram
-                };
+            let vram = if use_plane_line_latch && !force_plane_live_vram {
+                self.line_vram.get(line_idx).unwrap_or(&self.vram)
+            } else {
+                &self.vram
+            };
             let row = y * FRAME_WIDTH * 3;
             if !Self::display_enabled_from_regs(&regs) {
                 self.frame_buffer[row..row + FRAME_WIDTH * 3].fill(0);
@@ -1720,6 +1758,9 @@ impl Vdp {
                 comix_title_roll_active_height = line_active_height;
             }
             let mut line_b_opaque = 0usize;
+            let mut plane_a_tile_cache = PlaneTileCache::default();
+            let mut plane_b_tile_cache = PlaneTileCache::default();
+            let mut window_tile_cache = PlaneTileCache::default();
 
             for x in 0..FRAME_WIDTH {
                 if x >= line_active_width {
@@ -1765,12 +1806,11 @@ impl Vdp {
                             .rem_euclid(plane_height_px as isize)
                             as usize;
                     }
-                    if comix_roll_overlap_limit
-                        .map_or(false, |limit| sample_y >= limit)
-                    {
+                    if comix_roll_overlap_limit.map_or(false, |limit| sample_y >= limit) {
                         (None, false)
                     } else {
-                        self.sample_plane_pixel(
+                        self.sample_plane_pixel_cached(
+                            &mut plane_b_tile_cache,
                             vram,
                             plane_b_base,
                             (x + plane_width_px - b_hscroll) % plane_width_px,
@@ -1790,45 +1830,49 @@ impl Vdp {
                     line_b_opaque = line_b_opaque.saturating_add(1);
                 }
 
-                let (front_plane, front_raw_pri) = if !disable_window && self.window_active_at(&regs, x, y) {
-                    self.sample_plane_pixel(
-                        vram,
-                        window_base,
-                        x % window_width_px,
-                        y % window_height_px,
-                        window_width_tiles,
-                        window_height_tiles,
-                        false,
-                        false,
-                        false,
-                        false,
-                        interlace_mode_2,
-                        interlace_field,
-                    )
-                } else {
-                    let sample_y = if invert_vscroll_a {
-                        (y + plane_height_px - a_vscroll) % plane_height_px
+                let (front_plane, front_raw_pri) =
+                    if !disable_window && self.window_active_at(&regs, x, y) {
+                        self.sample_plane_pixel_cached(
+                            &mut window_tile_cache,
+                            vram,
+                            window_base,
+                            x % window_width_px,
+                            y % window_height_px,
+                            window_width_tiles,
+                            window_height_tiles,
+                            false,
+                            false,
+                            false,
+                            false,
+                            interlace_mode_2,
+                            interlace_field,
+                        )
                     } else {
-                        (y + a_vscroll) % plane_height_px
+                        let sample_y = if invert_vscroll_a {
+                            (y + plane_height_px - a_vscroll) % plane_height_px
+                        } else {
+                            (y + a_vscroll) % plane_height_px
+                        };
+                        self.sample_plane_pixel_cached(
+                            &mut plane_a_tile_cache,
+                            vram,
+                            plane_a_base,
+                            (x + plane_width_px - a_hscroll) % plane_width_px,
+                            sample_y,
+                            plane_width_tiles,
+                            plane_height_tiles,
+                            plane_a_uses_64x32_paged,
+                            true,
+                            plane_paged_layout_a,
+                            plane_paged_xmajor_a,
+                            interlace_mode_2,
+                            interlace_field,
+                        )
                     };
-                    self.sample_plane_pixel(
-                        vram,
-                        plane_a_base,
-                        (x + plane_width_px - a_hscroll) % plane_width_px,
-                        sample_y,
-                        plane_width_tiles,
-                        plane_height_tiles,
-                        plane_a_uses_64x32_paged,
-                        true,
-                        plane_paged_layout_a,
-                        plane_paged_xmajor_a,
-                        interlace_mode_2,
-                        interlace_field,
-                    )
-                };
                 let front_plane = if disable_plane_a { None } else { front_plane };
 
-                let mut composed = self.compose_plane_samples(front_plane, plane_b, ignore_plane_priority);
+                let mut composed =
+                    self.compose_plane_samples(front_plane, plane_b, ignore_plane_priority);
                 if bottom_bg_mask && y >= line_active_height.saturating_sub(32) {
                     composed = None;
                 }
@@ -1862,9 +1906,7 @@ impl Vdp {
                 let ci = (color_index as u8) & 0x3F;
                 let opaque = composed.map(|s| s.opaque).unwrap_or(false);
                 let composed_pri = composed.map(|s| s.priority_high).unwrap_or(false);
-                plane_meta[meta_index] = (opaque as u8)
-                    | ((composed_pri as u8) << 1)
-                    | (ci << 2);
+                plane_meta[meta_index] = (opaque as u8) | ((composed_pri as u8) << 1) | (ci << 2);
             }
             if comix_title_roll && !disable_comix_roll_sparse_mask {
                 line_plane_b_opaque_pixels[y] = line_b_opaque;
@@ -1912,8 +1954,8 @@ impl Vdp {
         let sat_use_live = self.debug_sat_flag(Self::DEBUG_SAT_LIVE_FLAG)
             || debug_flags::sat_live()
             || !sat_use_line_latched;
-        let sat_per_line = self.debug_sat_flag(Self::DEBUG_SAT_PER_LINE_FLAG)
-            || debug_flags::sat_per_line();
+        let sat_per_line =
+            self.debug_sat_flag(Self::DEBUG_SAT_PER_LINE_FLAG) || debug_flags::sat_per_line();
         let sprite_x_offset = debug_flags::sprite_x_offset();
         let sprite_y_offset = debug_flags::sprite_y_offset();
         if sat_per_line {
@@ -2168,8 +2210,7 @@ impl Vdp {
                                     && (pixel == 14 || pixel == 15)
                                 {
                                     let plane_ci = ((meta >> 2) & 0x3F) as usize;
-                                    let plane_color =
-                                        self.line_cram[dy][plane_ci % CRAM_COLORS];
+                                    let plane_color = self.line_cram[dy][plane_ci % CRAM_COLORS];
                                     let (pr, pg, pb) = md_color_to_rgb888(plane_color);
                                     let out = meta_index * 3;
                                     if pixel == 15 {
@@ -2182,12 +2223,9 @@ impl Vdp {
                                             self.frame_buffer[out + 1] = pg;
                                             self.frame_buffer[out + 2] = pb;
                                         } else {
-                                            self.frame_buffer[out] =
-                                                highlight_channel(pr);
-                                            self.frame_buffer[out + 1] =
-                                                highlight_channel(pg);
-                                            self.frame_buffer[out + 2] =
-                                                highlight_channel(pb);
+                                            self.frame_buffer[out] = highlight_channel(pr);
+                                            self.frame_buffer[out + 1] = highlight_channel(pg);
+                                            self.frame_buffer[out + 2] = highlight_channel(pb);
                                         }
                                     }
                                     continue;
@@ -2200,10 +2238,7 @@ impl Vdp {
                                 // low-priority sprite → shadow.
                                 // Both sprite & plane high priority → highlight.
                                 let (r, g, b) = if line_shadow_highlight {
-                                    if sprite_priority_high
-                                        && plane_opaque
-                                        && plane_priority_high
-                                    {
+                                    if sprite_priority_high && plane_opaque && plane_priority_high {
                                         (
                                             highlight_channel(r),
                                             highlight_channel(g),
@@ -2212,11 +2247,7 @@ impl Vdp {
                                     } else if sprite_priority_high {
                                         (r, g, b)
                                     } else {
-                                        (
-                                            shadow_channel(r),
-                                            shadow_channel(g),
-                                            shadow_channel(b),
-                                        )
+                                        (shadow_channel(r), shadow_channel(g), shadow_channel(b))
                                     }
                                 } else {
                                     (r, g, b)
@@ -2404,8 +2435,7 @@ impl Vdp {
                     // plane pixel.  They are transparent — they do NOT occupy
                     // the sprite layer and do NOT trigger collision.
                     let plane_ci = ((meta >> 2) & 0x3F) as usize;
-                    let plane_color =
-                        self.line_cram[dy_index][plane_ci % CRAM_COLORS];
+                    let plane_color = self.line_cram[dy_index][plane_ci % CRAM_COLORS];
                     let (pr, pg, pb) = md_color_to_rgb888(plane_color);
                     let out = meta_index * 3;
                     if pixel == 15 {
@@ -2437,7 +2467,11 @@ impl Vdp {
                 // low-priority → shadow, both high → highlight.
                 let (r, g, b) = if line_shadow_highlight {
                     if sprite_priority_high && plane_opaque && plane_priority_high {
-                        (highlight_channel(r), highlight_channel(g), highlight_channel(b))
+                        (
+                            highlight_channel(r),
+                            highlight_channel(g),
+                            highlight_channel(b),
+                        )
                     } else if sprite_priority_high {
                         (r, g, b)
                     } else {
@@ -2656,10 +2690,19 @@ impl Vdp {
                 let bg_palette = if (nt_word & 0x0800) != 0 { 16 } else { 0 };
                 let bg_priority = (nt_word & 0x1000) != 0;
 
-                let eff_px = if bg_hflip { 7 - pixel_x_in_tile } else { pixel_x_in_tile };
-                let eff_py = if bg_vflip { 7 - pixel_y_in_tile } else { pixel_y_in_tile };
+                let eff_px = if bg_hflip {
+                    7 - pixel_x_in_tile
+                } else {
+                    pixel_x_in_tile
+                };
+                let eff_py = if bg_vflip {
+                    7 - pixel_y_in_tile
+                } else {
+                    pixel_y_in_tile
+                };
 
-                let bg_color_idx = Self::sms_tile_pixel(&self.vram, bg_tile_index, eff_py, eff_px) as usize;
+                let bg_color_idx =
+                    Self::sms_tile_pixel(&self.vram, bg_tile_index, eff_py, eff_px) as usize;
                 let bg_opaque = bg_color_idx != 0;
 
                 // --- Sprites ---
@@ -2690,7 +2733,8 @@ impl Vdp {
                             tile_row_in_spr = py;
                         }
 
-                        let c = Self::sms_tile_pixel(&self.vram, tile_idx, tile_row_in_spr, px) as usize;
+                        let c = Self::sms_tile_pixel(&self.vram, tile_idx, tile_row_in_spr, px)
+                            as usize;
                         if c != 0 {
                             spr_color_idx = c + 16; // Sprites always use palette 1
                             spr_opaque = true;

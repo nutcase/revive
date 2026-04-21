@@ -1047,7 +1047,7 @@ mod tests {
         let addr: u32 = 0x200000;
 
         // Helper: write a word to EEPROM address (only even byte should trigger I2C)
-        let mut i2c_word_write = |m: &mut MemoryMap, val: u16| {
+        let i2c_word_write = |m: &mut MemoryMap, val: u16| {
             m.write_u16(addr, val);
         };
 

@@ -774,7 +774,7 @@ mod tests {
         let sda = 1 << sda_bit;
 
         // Helper: send a byte over I2C (MSB first)
-        let mut send_byte = |cart: &mut Cartridge, byte: u8| {
+        let send_byte = |cart: &mut Cartridge, byte: u8| {
             for i in (0..8).rev() {
                 let sda_val = if (byte >> i) & 1 != 0 { sda } else { 0 };
                 cart.write_eeprom(0x200000, sda_val);        // SCL low, set SDA

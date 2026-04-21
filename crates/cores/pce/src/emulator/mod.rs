@@ -109,10 +109,7 @@ impl Emulator {
             self.cycles += 1;
         }
         self.bus.tick(bus_cycles, self.cpu.clock_high_speed);
-        let mut chunk = self.bus.take_audio_samples();
-        if !chunk.is_empty() {
-            self.audio_buffer.append(&mut chunk);
-        }
+        self.bus.drain_audio_samples_into(&mut self.audio_buffer);
         cycles
     }
 
@@ -233,6 +230,12 @@ impl Emulator {
 
     pub fn drain_audio_samples(&mut self) -> Vec<i16> {
         std::mem::take(&mut self.audio_buffer)
+    }
+
+    pub fn drain_audio_samples_into(&mut self, out: &mut Vec<i16>) {
+        out.clear();
+        out.extend_from_slice(&self.audio_buffer);
+        self.audio_buffer.clear();
     }
 
     pub fn pending_audio_samples(&self) -> usize {

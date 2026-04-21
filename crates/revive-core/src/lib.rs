@@ -838,7 +838,7 @@ impl PceAdapter {
     pub fn configure_audio_output(&mut self, _sample_rate_hz: u32) {}
 
     pub fn drain_audio_i16(&mut self, out: &mut Vec<i16>) {
-        *out = self.emulator.drain_audio_samples();
+        self.emulator.drain_audio_samples_into(out);
     }
 
     pub fn set_button(&mut self, player: u8, button: VirtualButton, pressed: bool) {

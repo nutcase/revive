@@ -1,9 +1,9 @@
 use crate::psg::Psg;
 use crate::vce::Vce;
 use crate::vdc::{
-    DMA_CTRL_DST_DEC, DMA_CTRL_SRC_DEC, FRAME_HEIGHT, FRAME_WIDTH, VDC_CTRL_ENABLE_BACKGROUND,
+    Vdc, DMA_CTRL_DST_DEC, DMA_CTRL_SRC_DEC, FRAME_HEIGHT, FRAME_WIDTH, VDC_CTRL_ENABLE_BACKGROUND,
     VDC_CTRL_ENABLE_BACKGROUND_LEGACY, VDC_CTRL_ENABLE_SPRITES, VDC_CTRL_ENABLE_SPRITES_LEGACY,
-    VDC_DMA_WORD_CYCLES, VDC_VBLANK_INTERVAL, Vdc,
+    VDC_DMA_WORD_CYCLES, VDC_VBLANK_INTERVAL,
 };
 
 // Re-export VDC status constants for external consumers (examples, etc.)
@@ -996,13 +996,20 @@ impl Bus {
     }
 
     pub fn take_audio_samples(&mut self) -> Vec<i16> {
+        let mut out = Vec::with_capacity(self.audio_buffer.len());
+        self.drain_audio_samples_into(&mut out);
+        out
+    }
+
+    pub fn drain_audio_samples_into(&mut self, out: &mut Vec<i16>) {
         let drained = self.audio_buffer.len() as u64;
         if drained != 0 {
             self.audio_total_drained_samples.0 =
                 self.audio_total_drained_samples.0.saturating_add(drained);
             self.audio_total_drain_calls.0 = self.audio_total_drain_calls.0.saturating_add(1);
         }
-        std::mem::take(&mut self.audio_buffer)
+        out.extend_from_slice(&self.audio_buffer);
+        self.audio_buffer.clear();
     }
 
     /// Copy the current frame into `buf`, reusing its allocation.
