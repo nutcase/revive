@@ -17,7 +17,6 @@ use snes_emulator::cartridge::Cartridge as SnesCartridge;
 use snes_emulator::emulator::Emulator as SnesEmulator;
 
 pub type Result<T> = std::result::Result<T, String>;
-const PCE_VISIBLE_HEIGHT: usize = 208;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemKind {
@@ -759,7 +758,6 @@ pub struct PceAdapter {
     hucard: bool,
     pad_state: u8,
     latest_frame: Vec<u32>,
-    rgb_frame: Vec<u8>,
 }
 
 impl PceAdapter {
@@ -793,7 +791,6 @@ impl PceAdapter {
             hucard,
             pad_state: 0xFF,
             latest_frame: vec![0; frame_len],
-            rgb_frame: Vec::with_capacity(frame_len * 3),
         })
     }
 
@@ -820,22 +817,14 @@ impl PceAdapter {
             self.latest_frame.resize(expected, 0);
         }
 
-        let height = pce_visible_height(raw_height);
-        self.rgb_frame.clear();
-        self.rgb_frame.reserve(width * height * 3);
-        for row in self.latest_frame.chunks_exact(width).take(height) {
-            for &pixel in row {
-                self.rgb_frame.push(((pixel >> 16) & 0xFF) as u8);
-                self.rgb_frame.push(((pixel >> 8) & 0xFF) as u8);
-                self.rgb_frame.push((pixel & 0xFF) as u8);
-            }
-        }
+        let byte_len = width * raw_height * std::mem::size_of::<u32>();
+        let frame_bytes = &argb8888_u32_frame_as_bgra8888_bytes(&self.latest_frame)[..byte_len];
 
         FrameView {
             width,
-            height,
-            format: PixelFormat::Rgb24,
-            data: &self.rgb_frame,
+            height: raw_height,
+            format: PixelFormat::Bgra8888,
+            data: frame_bytes,
         }
     }
 
@@ -944,10 +933,6 @@ impl PceAdapter {
         .map_err(|err| err.to_string())?;
         Ok(())
     }
-}
-
-fn pce_visible_height(raw_height: usize) -> usize {
-    raw_height.min(PCE_VISIBLE_HEIGHT)
 }
 
 pub struct GameBoyAdapter {
@@ -1527,11 +1512,32 @@ mod tests {
     }
 
     #[test]
-    fn pce_video_crops_bottom_overscan() {
-        assert_eq!(pce_visible_height(240), 208);
-        assert_eq!(pce_visible_height(224), 208);
-        assert_eq!(pce_visible_height(216), 208);
-        assert_eq!(pce_visible_height(200), 200);
+    fn pce_frame_uses_core_display_height() {
+        let emulator = PceEmulator::new();
+        let width = emulator.display_width();
+        let height = emulator.display_height();
+        let mut latest_frame = vec![0; width * height];
+        latest_frame[width * height - 1] = 0xFF12_3456;
+        let mut adapter = PceAdapter {
+            emulator,
+            rom_path: PathBuf::from("dummy.pce"),
+            title: "dummy".to_string(),
+            hucard: true,
+            pad_state: 0xFF,
+            latest_frame,
+        };
+
+        let frame = adapter.frame();
+
+        assert_eq!(frame.height, height);
+        assert_eq!(
+            frame.data.len(),
+            width * height * std::mem::size_of::<u32>()
+        );
+        assert_eq!(
+            &frame.data[frame.data.len() - 4..],
+            &[0x56, 0x34, 0x12, 0xFF]
+        );
     }
 
     #[test]
