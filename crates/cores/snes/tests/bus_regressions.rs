@@ -146,7 +146,7 @@ fn bus_hirq_enable_midscanline_at_match_sets_timeup_immediately() {
 }
 
 #[test]
-fn bus_virq_enable_on_matching_line_after_line_start_sets_timeup_immediately() {
+fn bus_virq_enable_on_matching_line_after_line_start_waits_for_next_line_match() {
     let mut bus = Bus::new(vec![]);
 
     bus.get_ppu_mut().step(341 + 8);
@@ -160,8 +160,33 @@ fn bus_virq_enable_on_matching_line_after_line_start_sets_timeup_immediately() {
     let timeup = bus.read_u8(0x4211);
     assert_eq!(
         timeup & 0x80,
-        0x80,
-        "enabling V-IRQ after the matching line has already started must assert TIMEUP immediately"
+        0,
+        "enabling V-IRQ after the matching line has already started must not retrigger midline"
+    );
+}
+
+#[test]
+fn bus_virq_reenable_after_timeup_clear_does_not_retrigger_same_scanline() {
+    let mut bus = Bus::new(vec![]);
+
+    bus.write_u8(0x4209, 0x01);
+    bus.write_u8(0x420A, 0x00);
+    bus.write_u8(0x4200, 0x20);
+
+    bus.get_ppu_mut().step(341);
+    bus.tick_timers();
+    assert_eq!(bus.get_ppu().get_scanline(), 1);
+
+    assert_eq!(bus.read_u8(0x4211) & 0x80, 0x80);
+
+    bus.get_ppu_mut().step(8);
+    assert_eq!(bus.get_ppu().get_scanline(), 1);
+    bus.write_u8(0x4200, 0x20);
+
+    assert_eq!(
+        bus.read_u8(0x4211) & 0x80,
+        0,
+        "restoring NMITIMEN after clearing TIMEUP must not schedule a duplicate V-IRQ"
     );
 }
 

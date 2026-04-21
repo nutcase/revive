@@ -5784,8 +5784,9 @@ impl Bus {
 
     // Re-check IRQ timer comparators when IRQ enables or timer registers are written mid-scanline.
     // A newly written H compare should only fire immediately when it matches the current dot,
-    // not when that dot has already passed. Several games update HTIME before VTIME inside an
-    // IRQ handler; treating "past H" as a live match retriggers the old V line immediately.
+    // not when that dot has already passed. V-only IRQs are edge-triggered at the scanline
+    // boundary in tick_timers(); treating the V comparator as a live level causes IRQ handlers
+    // that acknowledge TIMEUP and then restore $4200 on the same line to retrigger immediately.
     fn recheck_irq_timer_match(&mut self) {
         if !(self.irq_h_enabled || self.irq_v_enabled) {
             return;
@@ -5810,10 +5811,6 @@ impl Bus {
             }
             (false, true) => {
                 self.irq_v_matched_line = None;
-                // V-IRQ is the H=0 special case; require that the scanline has started.
-                if v_match && cycle > 0 {
-                    self.irq_pending = true;
-                }
             }
             _ => {}
         }
