@@ -594,6 +594,7 @@ pub struct Ppu {
 #[derive(Debug, Clone)]
 pub(crate) struct SpriteData {
     pub(crate) x: u16,
+    pub(crate) x_signed: i16,
     pub(crate) y: u8,
     pub(crate) tile: u16,
     pub(crate) palette: u8,
@@ -601,9 +602,14 @@ pub(crate) struct SpriteData {
     pub(crate) flip_x: bool,
     pub(crate) flip_y: bool,
     pub(crate) size: SpriteSize,
+    pub(crate) width: u8,
+    pub(crate) height: u8,
+    pub(crate) line_rel_y: u8,
+    pub(crate) line_tile_y: u8,
+    pub(crate) line_pixel_y: u8,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum SpriteSize {
     Small, // BGモードによって 8x8 または 16x16
     Large, // BGモードによって 16x16, 32x32, または 64x64

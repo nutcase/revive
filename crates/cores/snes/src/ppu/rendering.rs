@@ -1575,6 +1575,7 @@ impl Ppu {
         0xFF000000 | (r << 16) | (g << 8) | b
     }
 
+    #[inline]
     pub(crate) fn render_mode7_with_layer(&mut self, x: u16, y: u16) -> (u32, u8, u8) {
         // Mode 7: affine transform into 1024x1024 world; tiles: 8x8 8bpp, map: 128x128 bytes.
         // Helper: sample for a desired layer (0:BG1, 1:BG2 when EXTBG). Applies mosaic per layer.
@@ -1600,13 +1601,8 @@ impl Ppu {
             let (ix, iy, outside, wrapped) = if inside {
                 (wx, wy, false, false)
             } else if !repeat_off {
-                // Wrap to 0..1023 using Euclidean modulo
-                (
-                    (((wx % 1024) + 1024) % 1024),
-                    (((wy % 1024) + 1024) % 1024),
-                    false,
-                    true,
-                )
+                // 1024 is a power of two, so masking matches Euclidean modulo for signed i32.
+                (wx & 0x03FF, wy & 0x03FF, false, true)
             } else {
                 (wx, wy, true, false)
             };
@@ -1615,8 +1611,8 @@ impl Ppu {
                 if !fill_char0 {
                     return (0, 0, desired_layer, false, true, false, false);
                 }
-                let px = (((ix % 8) + 8) % 8) as u8;
-                let py = (((iy % 8) + 8) % 8) as u8;
+                let px = (ix & 7) as u8;
+                let py = (iy & 7) as u8;
                 if self.extbg {
                     let (c, pr, lid) = self.sample_mode7_for_layer(0, px, py, desired_layer);
                     return (c, pr, lid, false, true, true, false);
@@ -1629,8 +1625,8 @@ impl Ppu {
             // In-bounds or wrapped sampling
             let tile_x = (ix >> 3) & 0x7F; // 0..127
             let tile_y = (iy >> 3) & 0x7F; // 0..127
-            let px = (((ix % 8) + 8) % 8) as u8;
-            let py = (((iy % 8) + 8) % 8) as u8;
+            let px = (ix & 7) as u8;
+            let py = (iy & 7) as u8;
             // Mode 7 VRAM layout:
             // - Tilemap: low byte of VRAM words 0x0000..0x3FFF (128x128 bytes)
             // - Tile data: high byte of the same VRAM words (256 tiles * 64 bytes = 16384 bytes)
@@ -1708,6 +1704,7 @@ impl Ppu {
 
     // Render a single Mode 7 layer for EXTBG mode.
     // desired_layer: 0=BG1, 1=BG2
+    #[inline]
     pub(crate) fn render_mode7_single_layer(
         &mut self,
         x: u16,
@@ -1732,11 +1729,7 @@ impl Ppu {
         let (ix, iy, outside) = if inside {
             (wx, wy, false)
         } else if !repeat_off {
-            (
-                ((wx % 1024) + 1024) % 1024,
-                ((wy % 1024) + 1024) % 1024,
-                false,
-            )
+            (wx & 0x03FF, wy & 0x03FF, false)
         } else {
             (wx, wy, true)
         };
@@ -1744,14 +1737,14 @@ impl Ppu {
             if !fill_char0 {
                 return (0, 0, desired_layer);
             }
-            let px = (((ix % 8) + 8) % 8) as u8;
-            let py = (((iy % 8) + 8) % 8) as u8;
+            let px = (ix & 7) as u8;
+            let py = (iy & 7) as u8;
             return self.sample_mode7_for_layer(0, px, py, desired_layer);
         }
         let tile_x = (ix >> 3) & 0x7F;
         let tile_y = (iy >> 3) & 0x7F;
-        let px = (((ix % 8) + 8) % 8) as u8;
-        let py = (((iy % 8) + 8) % 8) as u8;
+        let px = (ix & 7) as u8;
+        let py = (iy & 7) as u8;
         let map_word = ((tile_y as usize) << 7) | (tile_x as usize);
         let map_index = map_word * 2;
         if map_index >= self.vram.len() {
@@ -2363,17 +2356,22 @@ impl Ppu {
     }
 
     pub(crate) fn is_color_math_enabled(&self, layer_id: u8) -> bool {
+        let bit_mask = Self::color_math_layer_bit(layer_id);
+        bit_mask != 0 && (self.cgadsub & bit_mask) != 0
+    }
+
+    #[inline]
+    pub(crate) fn color_math_layer_bit(layer_id: u8) -> u8 {
         // レイヤーIDに対応するビットをチェック
-        let bit_mask = match layer_id {
+        match layer_id {
             0 => 0x01, // BG1
             1 => 0x02, // BG2
             2 => 0x04, // BG3
             3 => 0x08, // BG4
             4 => 0x10, // Sprite
             5 => 0x20, // Backdrop
-            _ => return false,
-        };
-        (self.cgadsub & bit_mask) != 0
+            _ => 0,
+        }
     }
 
     pub(crate) fn fixed_color_to_rgb(&self) -> u32 {
@@ -2486,6 +2484,7 @@ impl Ppu {
     }
 
     // Mode 7 affine transform producing integer world pixels.
+    #[inline]
     pub(crate) fn mode7_world_xy_int(&self, sx: i32, sy: i32) -> (i32, i32) {
         // Promote to i64 to avoid overflow in affine products.
         //
@@ -3027,8 +3026,9 @@ impl Ppu {
         y: u16,
         sub_transparent: bool,
     ) -> u32 {
+        let force_display = self.force_display_active();
         // Forced blank produces black regardless of color math (unless FORCE_DISPLAY)
-        if (self.screen_display & 0x80) != 0 && !self.force_display_active() {
+        if (self.screen_display & 0x80) != 0 && !force_display {
             return 0;
         }
         // Fast path: no window regions and no color-math enabled
@@ -3036,10 +3036,21 @@ impl Ppu {
             return main_color_in;
         }
 
+        // CGWSEL region types (MM / SS): 0=nowhere, 1=outside, 2=inside, 3=everywhere.
+        let mm = (self.cgwsel >> 6) & 0x03; // main screen black region
+        let ss = (self.cgwsel >> 4) & 0x03; // sub screen transparent region
+        let layer_math_bit = Self::color_math_layer_bit(main_layer_id);
+        let math_enabled = layer_math_bit != 0 && (self.cgadsub & layer_math_bit) != 0;
+        let obj_math_blocked = main_layer_id == 4 && !main_obj_math_allowed;
+        if mm == 0 && ss == 0 && (obj_math_blocked || !math_enabled) {
+            return main_color_in;
+        }
+
         // Color window W(x): 1=inside, 0=outside.
         // If the color window is disabled (WOBJSEL upper nibble = 0), do not apply MM/SS.
-        let color_window_enabled = self.window_color_mask != 0;
-        let win = if !color_window_enabled {
+        let win = if mm == 0 && ss == 0 {
+            false
+        } else if self.window_color_mask == 0 {
             false
         } else if self.line_window_prepared {
             self.color_window_lut.get(x as usize).copied().unwrap_or(0) != 0
@@ -3047,9 +3058,6 @@ impl Ppu {
             self.evaluate_window_mask(x, self.window_color_mask, self.color_window_logic)
         };
 
-        // CGWSEL region types (MM / SS): 0=nowhere, 1=outside, 2=inside, 3=everywhere.
-        let mm = (self.cgwsel >> 6) & 0x03; // main screen black region
-        let ss = (self.cgwsel >> 4) & 0x03; // sub screen transparent region
         let region_hit = |mode: u8, inside: bool| -> bool {
             match mode {
                 0 => false,
@@ -3066,7 +3074,7 @@ impl Ppu {
         // evaluated because modes 1 (outside window) and 3 (everywhere) apply even when no
         // windows are configured.
         let mut main_color = main_color_in;
-        if region_hit(mm, win) && !self.force_display_active() {
+        if region_hit(mm, win) && !force_display {
             if crate::debug_flags::render_metrics() {
                 if mm == 1 {
                     self.dbg_clip_outside = self.dbg_clip_outside.saturating_add(1);
@@ -3085,7 +3093,7 @@ impl Ppu {
 
         // Mask color math via the sub-screen transparent region.
         // When active, output the (possibly black-clipped) main screen color unchanged.
-        if region_hit(ss, win) && !self.force_display_active() {
+        if region_hit(ss, win) && !force_display {
             if let Some(cfg) = trace_sample_dot_config() {
                 if self.frame == cfg.frame && x == cfg.x && y == cfg.y {
                     println!(
@@ -3106,28 +3114,13 @@ impl Ppu {
             return main_color;
         }
 
-        // Subsource is only used for color math; transparent main becomes backdrop earlier
-        let use_sub_src = (self.cgwsel & 0x02) != 0; // 1=subscreen, 0=fixed
-                                                     // NOTE: If the subscreen pixel is transparent, real hardware uses fixed color ($2132)
-                                                     // as the addend, *and* disables half color math for that pixel.
-        let sub_is_fixed_fallback = use_sub_src && sub_transparent;
-        let sub_src = if use_sub_src {
-            if sub_is_fixed_fallback {
-                self.fixed_color_to_rgb()
-            } else {
-                sub_color_in
-            }
-        } else {
-            self.fixed_color_to_rgb()
-        };
-
         // OBJ color math is disabled for palettes 0-3 on real hardware.
-        if main_layer_id == 4 && !main_obj_math_allowed {
+        if obj_math_blocked {
             return main_color;
         }
 
         // このメインレイヤにカラー演算が許可されているか
-        if !self.is_color_math_enabled(main_layer_id) {
+        if !math_enabled {
             if crate::debug_flags::render_metrics() {
                 self.dbg_math_blocked = self.dbg_math_blocked.saturating_add(1);
                 if main_layer_id == 4 {
@@ -3140,6 +3133,17 @@ impl Ppu {
             }
             return main_color;
         }
+
+        // Subsource is only used for color math; transparent main becomes backdrop earlier
+        let use_sub_src = (self.cgwsel & 0x02) != 0; // 1=subscreen, 0=fixed
+                                                     // NOTE: If the subscreen pixel is transparent, real hardware uses fixed color ($2132)
+                                                     // as the addend, *and* disables half color math for that pixel.
+        let sub_is_fixed_fallback = use_sub_src && sub_transparent;
+        let sub_src = if use_sub_src && !sub_is_fixed_fallback {
+            sub_color_in
+        } else {
+            self.fixed_color_to_rgb()
+        };
 
         let src = sub_src;
         let src_is_fixed = !use_sub_src || sub_is_fixed_fallback;
@@ -3168,7 +3172,7 @@ impl Ppu {
                     use_sub_src as u8,
                     sub_is_fixed_fallback as u8,
                     sub_transparent as u8,
-                    self.is_color_math_enabled(main_layer_id) as u8,
+                    math_enabled as u8,
                     is_addition as u8,
                     halve_flag as u8,
                     hires_halve as u8,

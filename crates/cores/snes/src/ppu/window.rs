@@ -28,6 +28,45 @@ fn cached_env_flag(name: &'static str) -> bool {
     }
 }
 
+#[inline(always)]
+fn window_mask_from_inside(w1_inside: bool, w2_inside: bool, mask_setting: u8, logic: u8) -> bool {
+    if mask_setting == 0 {
+        return false;
+    }
+
+    let w1_enabled = (mask_setting & 0x02) != 0;
+    let w2_enabled = (mask_setting & 0x08) != 0;
+
+    if !w1_enabled && !w2_enabled {
+        return false;
+    }
+
+    let w1_result = if w1_enabled {
+        w1_inside ^ ((mask_setting & 0x01) != 0)
+    } else {
+        false
+    };
+    let w2_result = if w2_enabled {
+        w2_inside ^ ((mask_setting & 0x04) != 0)
+    } else {
+        false
+    };
+
+    if !w2_enabled {
+        return w1_result;
+    }
+    if !w1_enabled {
+        return w2_result;
+    }
+
+    match logic & 0x03 {
+        0 => w1_result || w2_result,
+        1 => w1_result && w2_result,
+        2 => w1_result ^ w2_result,
+        _ => !(w1_result ^ w2_result),
+    }
+}
+
 impl Ppu {
     // ウィンドウマスク関連関数
     #[inline]
@@ -76,54 +115,12 @@ impl Ppu {
             return false; // ウィンドウ無効
         }
 
-        let w1_enabled = (mask_setting & 0x02) != 0;
-        let w1_inverted = (mask_setting & 0x01) != 0;
-        let w2_enabled = (mask_setting & 0x08) != 0;
-        let w2_inverted = (mask_setting & 0x04) != 0;
-
-        let w1_result = if w1_enabled {
-            let inside = self.is_inside_window1(x);
-            if w1_inverted {
-                !inside
-            } else {
-                inside
-            }
-        } else {
-            false
-        };
-
-        let w2_result = if w2_enabled {
-            let inside = self.is_inside_window2(x);
-            if w2_inverted {
-                !inside
-            } else {
-                inside
-            }
-        } else {
-            false
-        };
-
-        // ウィンドウが1つも有効でない場合
-        if !w1_enabled && !w2_enabled {
-            return false;
-        }
-
-        // ウィンドウが1つだけ有効な場合
-        if w1_enabled && !w2_enabled {
-            return w1_result;
-        }
-        if !w1_enabled && w2_enabled {
-            return w2_result;
-        }
-
-        // 両方有効な場合はロジック演算
-        let res = match logic & 0x03 {
-            0 => w1_result || w2_result,   // OR
-            1 => w1_result && w2_result,   // AND
-            2 => w1_result ^ w2_result,    // XOR
-            3 => !(w1_result ^ w2_result), // XNOR
-            _ => false,
-        };
+        let res = window_mask_from_inside(
+            self.is_inside_window1(x),
+            self.is_inside_window2(x),
+            mask_setting,
+            logic,
+        );
 
         if crate::debug_flags::render_metrics() && res {
             match logic & 0x03 {
@@ -252,64 +249,63 @@ impl Ppu {
         }
         self.line_window_prepared = true;
         self.line_window_cfg = Some(cfg);
+        let ignore_color_window = Self::ignore_color_window_debug();
+        let ignore_bg_windows = Self::ignore_bg_windows_debug();
+        let ignore_obj_windows = Self::ignore_obj_windows_debug();
+        let main_bg_enabled = [
+            !ignore_bg_windows && (self.tmw_mask & 0x01) != 0,
+            !ignore_bg_windows && (self.tmw_mask & 0x02) != 0,
+            !ignore_bg_windows && (self.tmw_mask & 0x04) != 0,
+            !ignore_bg_windows && (self.tmw_mask & 0x08) != 0,
+        ];
+        let sub_bg_enabled = [
+            !ignore_bg_windows && (self.tsw_mask & 0x01) != 0,
+            !ignore_bg_windows && (self.tsw_mask & 0x02) != 0,
+            !ignore_bg_windows && (self.tsw_mask & 0x04) != 0,
+            !ignore_bg_windows && (self.tsw_mask & 0x08) != 0,
+        ];
+        let obj_m_en = !ignore_obj_windows && (self.tmw_mask & 0x10) != 0;
+        let obj_s_en = !ignore_obj_windows && (self.tsw_mask & 0x10) != 0;
         for x in 0..256u16 {
+            let x_byte = x as u8;
+            let w1_inside = x_byte >= self.window1_left && x_byte <= self.window1_right;
+            let w2_inside = x_byte >= self.window2_left && x_byte <= self.window2_right;
             // Color window
-            let wcol = if Self::ignore_color_window_debug() || self.window_color_mask == 0 {
+            let wcol = if ignore_color_window || self.window_color_mask == 0 {
                 false
             } else {
-                self.evaluate_window_mask(x, self.window_color_mask, self.color_window_logic)
+                window_mask_from_inside(
+                    w1_inside,
+                    w2_inside,
+                    self.window_color_mask,
+                    self.color_window_logic,
+                )
             };
-            self.color_window_lut[x as usize] = if wcol { 1 } else { 0 };
+            let idx = x as usize;
+            self.color_window_lut[idx] = if wcol { 1 } else { 0 };
 
             // BG1..BG4 (main/sub)
-            for bg in 0..4u8 {
-                // main
-                let m_enabled =
-                    !Self::ignore_bg_windows_debug() && (self.tmw_mask & (1 << bg)) != 0;
-                let m_mask = if m_enabled
-                    && self.evaluate_window_mask(
-                        x,
-                        self.window_bg_mask[bg as usize],
-                        self.bg_window_logic[bg as usize],
-                    ) {
-                    1
-                } else {
-                    0
-                };
-                self.main_bg_window_lut[bg as usize][x as usize] = m_mask;
-                // sub
-                let s_enabled =
-                    !Self::ignore_bg_windows_debug() && (self.tsw_mask & (1 << bg)) != 0;
-                let s_mask = if s_enabled
-                    && self.evaluate_window_mask(
-                        x,
-                        self.window_bg_mask[bg as usize],
-                        self.bg_window_logic[bg as usize],
-                    ) {
-                    1
-                } else {
-                    0
-                };
-                self.sub_bg_window_lut[bg as usize][x as usize] = s_mask;
+            for bg in 0..4usize {
+                let bg_mask = window_mask_from_inside(
+                    w1_inside,
+                    w2_inside,
+                    self.window_bg_mask[bg],
+                    self.bg_window_logic[bg],
+                );
+                self.main_bg_window_lut[bg][idx] =
+                    if main_bg_enabled[bg] && bg_mask { 1 } else { 0 };
+                self.sub_bg_window_lut[bg][idx] = if sub_bg_enabled[bg] && bg_mask { 1 } else { 0 };
             }
 
             // OBJ main/sub
-            let obj_m_en = !Self::ignore_obj_windows_debug() && (self.tmw_mask & 0x10) != 0;
-            let obj_s_en = !Self::ignore_obj_windows_debug() && (self.tsw_mask & 0x10) != 0;
-            self.main_obj_window_lut[x as usize] = if obj_m_en
-                && self.evaluate_window_mask(x, self.window_obj_mask, self.obj_window_logic)
-            {
-                1
-            } else {
-                0
-            };
-            self.sub_obj_window_lut[x as usize] = if obj_s_en
-                && self.evaluate_window_mask(x, self.window_obj_mask, self.obj_window_logic)
-            {
-                1
-            } else {
-                0
-            };
+            let obj_mask = window_mask_from_inside(
+                w1_inside,
+                w2_inside,
+                self.window_obj_mask,
+                self.obj_window_logic,
+            );
+            self.main_obj_window_lut[idx] = if obj_m_en && obj_mask { 1 } else { 0 };
+            self.sub_obj_window_lut[idx] = if obj_s_en && obj_mask { 1 } else { 0 };
         }
     }
 }

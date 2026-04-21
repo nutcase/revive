@@ -13,10 +13,12 @@ impl Ppu {
         }
     }
 
+    #[inline]
     pub(crate) fn obj_interlace_active(&self) -> bool {
         self.interlace && self.obj_interlace
     }
 
+    #[inline]
     pub(crate) fn obj_line_for_scanline(&self, scanline: u16) -> u16 {
         if self.obj_interlace_active() {
             (scanline << 1) | (self.interlace_field as u16)
@@ -25,6 +27,7 @@ impl Ppu {
         }
     }
 
+    #[inline]
     pub(crate) fn obj_sprite_dy(&self, obj_line: u16, sprite_y: u8) -> u16 {
         if self.obj_interlace_active() {
             let sprite_y_line = (sprite_y as u16) << 1;
@@ -34,6 +37,7 @@ impl Ppu {
         }
     }
 
+    #[inline]
     pub(crate) fn obj_sprite_height_lines(&self, sprite_height: u16) -> u16 {
         // OBJ interlace shows alternate lines each field, so compare against the
         // original sprite height (not doubled). This makes pixels appear half-height
@@ -41,12 +45,47 @@ impl Ppu {
         sprite_height
     }
 
+    #[inline]
     pub(crate) fn obj_sprite_rel_y(&self, dy_lines: u16) -> u8 {
         // For OBJ interlace, dy_lines already encodes even/odd lines per field.
         dy_lines as u8
     }
 
+    #[inline]
+    fn build_sprite_data(
+        &self,
+        x: u16,
+        y: u8,
+        tile: u16,
+        palette: u8,
+        priority: u8,
+        flip_x: bool,
+        flip_y: bool,
+        size: SpriteSize,
+        width: u8,
+        height: u8,
+        line_rel_y: u8,
+    ) -> SpriteData {
+        SpriteData {
+            x,
+            x_signed: Self::sprite_x_signed(x),
+            y,
+            tile,
+            palette,
+            priority,
+            flip_x,
+            flip_y,
+            size,
+            width,
+            height,
+            line_rel_y,
+            line_tile_y: line_rel_y / 8,
+            line_pixel_y: line_rel_y & 7,
+        }
+    }
+
     // 共通のスプライトピクセル取得（画面有効フラグを引数で渡す）
+    #[inline]
     pub(crate) fn get_sprite_pixel_common(
         &self,
         x: u16,
@@ -64,7 +103,6 @@ impl Ppu {
             return (0, 0, true);
         }
         let x_i16 = x as i16;
-        let obj_line = self.obj_line_for_scanline(y);
         let sprites = &self.line_sprites;
         let drawable_sprite_limit = if self.sprite_draw_disabled && self.sprite_time_over {
             self.sprite_timeover_first_idx as usize
@@ -85,40 +123,37 @@ impl Ppu {
                 y,
                 enabled as u8,
                 sprites.len(),
-                obj_line
+                self.obj_line_for_scanline(y)
             );
         }
         // スプライト同士の優先順位はOAM順（評価順）で決まる。
         // 優先度ビットはBGとの優先にのみ使用するので、ここでは順序を変えない。
-        for (idx, sprite) in sprites.iter().enumerate() {
-            if idx >= drawable_sprite_limit {
-                break;
-            }
-            let (sprite_width, sprite_height) = self.get_sprite_pixel_size(&sprite.size);
-            let sx = Self::sprite_x_signed(sprite.x);
-            // Y is 8-bit and wraps; test overlap via wrapped subtraction.
-            let dy_lines = self.obj_sprite_dy(obj_line, sprite.y);
-            let sprite_height_lines = self.obj_sprite_height_lines(sprite_height as u16);
-            if dy_lines >= sprite_height_lines {
-                continue;
-            }
-            if x_i16 < sx || x_i16 >= sx.saturating_add(sprite_width as i16) {
+        for (idx, sprite) in sprites.iter().take(drawable_sprite_limit).enumerate() {
+            let sx = sprite.x_signed;
+            if x_i16 < sx || x_i16 >= sx.saturating_add(sprite.width as i16) {
                 continue;
             }
 
             // スプライト内相対座標→タイル/ピクセル座標
             let rel_x = (x_i16 - sx) as u8;
-            let rel_y = self.obj_sprite_rel_y(dy_lines);
             let tile_x = rel_x / 8;
-            let tile_y = rel_y / 8;
             let pixel_x = rel_x % 8;
-            let pixel_y = rel_y % 8;
-            let color = self.render_sprite_tile(sprite, tile_x, tile_y, pixel_x, pixel_y);
+            let color = self.render_sprite_tile(
+                sprite,
+                tile_x,
+                sprite.line_tile_y,
+                pixel_x,
+                sprite.line_pixel_y,
+            );
             if trace_dot {
-                let tile_num = self.calculate_sprite_tile_number(sprite, tile_x, tile_y);
+                let tile_num =
+                    self.calculate_sprite_tile_number(sprite, tile_x, sprite.line_tile_y);
                 let tile_addr = self.sprite_tile_base_word_addr(tile_num);
-                let row01_word = (tile_addr.wrapping_add(pixel_y as u16)) & 0x7FFF;
-                let row23_word = (tile_addr.wrapping_add(8).wrapping_add(pixel_y as u16)) & 0x7FFF;
+                let row01_word = (tile_addr.wrapping_add(sprite.line_pixel_y as u16)) & 0x7FFF;
+                let row23_word = (tile_addr
+                    .wrapping_add(8)
+                    .wrapping_add(sprite.line_pixel_y as u16))
+                    & 0x7FFF;
                 let plane0_addr = (row01_word as usize) * 2;
                 let plane1_addr = plane0_addr + 1;
                 let plane2_addr = (row23_word as usize) * 2;
@@ -139,11 +174,11 @@ impl Ppu {
                         sx,
                         sprite.y,
                         rel_x,
-                        rel_y,
+                        sprite.line_rel_y,
                         tile_x,
-                        tile_y,
+                        sprite.line_tile_y,
                         pixel_x,
-                        pixel_y,
+                        sprite.line_pixel_y,
                         tile_num,
                         color,
                         tile_addr,
@@ -308,7 +343,7 @@ impl Ppu {
             };
 
             // スプライトのサイズを取得
-            let (_, sprite_height) = self.get_sprite_pixel_size(&size);
+            let (sprite_width, sprite_height) = self.get_sprite_pixel_size(&size);
 
             let obj_line = self.obj_line_for_scanline(y);
             // このスプライトが現在のスキャンラインに表示されるかチェック
@@ -327,16 +362,20 @@ impl Ppu {
             let flip_x = (attr & 0x40) != 0;
             let flip_y = (attr & 0x80) != 0;
 
-            sprites.push(SpriteData {
+            let line_rel_y = self.obj_sprite_rel_y(dy_lines);
+            sprites.push(self.build_sprite_data(
                 x,
-                y: sprite_y,
+                sprite_y,
                 tile,
                 palette,
                 priority,
                 flip_x,
                 flip_y,
                 size,
-            });
+                sprite_width,
+                sprite_height,
+                line_rel_y,
+            ));
         }
 
         sprites
@@ -391,7 +430,8 @@ impl Ppu {
 
             // Note: Y is 8-bit and wraps on hardware (e.g., 0xFE shows at top).
 
-            sprites.push(SpriteData {
+            let (sprite_width, sprite_height) = self.get_sprite_pixel_size(&size);
+            sprites.push(self.build_sprite_data(
                 x,
                 y,
                 tile,
@@ -400,13 +440,17 @@ impl Ppu {
                 flip_x,
                 flip_y,
                 size,
-            });
+                sprite_width,
+                sprite_height,
+                0,
+            ));
         }
 
         sprites
     }
 
     // スプライトの実際のピクセルサイズを取得
+    #[inline]
     pub(crate) fn get_sprite_pixel_size(&self, size: &SpriteSize) -> (u8, u8) {
         match self.sprite_size {
             0 => match size {
@@ -445,6 +489,7 @@ impl Ppu {
     }
 
     // スプライトタイル描画
+    #[inline]
     pub(crate) fn render_sprite_tile(
         &self,
         sprite: &SpriteData,
@@ -479,6 +524,7 @@ impl Ppu {
         }
     }
 
+    #[inline]
     pub(crate) fn calculate_sprite_tile_number(
         &self,
         sprite: &SpriteData,
@@ -486,8 +532,7 @@ impl Ppu {
         tile_y: u8,
     ) -> u16 {
         // スプライトのタイルレイアウト計算
-        let (sprite_width, sprite_height) = self.get_sprite_pixel_size(&sprite.size);
-        let tiles_per_row = sprite_width / 8;
+        let tiles_per_row = sprite.width / 8;
 
         // フリップを考慮したタイル座標
         let actual_tile_x = if sprite.flip_x {
@@ -496,7 +541,7 @@ impl Ppu {
             tile_x
         };
         let actual_tile_y = if sprite.flip_y {
-            (sprite_height / 8 - 1) - tile_y
+            (sprite.height / 8 - 1) - tile_y
         } else {
             tile_y
         };
@@ -507,6 +552,7 @@ impl Ppu {
         sprite.tile + (actual_tile_y as u16) * 16 + (actual_tile_x as u16)
     }
 
+    #[inline]
     pub(crate) fn get_sprite_bpp(&self) -> u8 {
         // SNES OBJ (sprites) are always 4bpp.
         4
@@ -810,16 +856,11 @@ impl Ppu {
 
             if count_seen < 32 {
                 let idx = self.line_sprites.len();
-                self.line_sprites.push(SpriteData {
-                    x,
-                    y,
-                    tile,
-                    palette,
-                    priority,
-                    flip_x,
-                    flip_y,
-                    size,
-                });
+                let line_rel_y = self.obj_sprite_rel_y(dy_lines);
+                self.line_sprites.push(self.build_sprite_data(
+                    x, y, tile, palette, priority, flip_x, flip_y, size, sprite_w, sprite_h,
+                    line_rel_y,
+                ));
                 if (priority as usize) < self.line_sprites_by_priority.len() {
                     self.line_sprites_by_priority[priority as usize].push(idx);
                 }
@@ -849,12 +890,11 @@ impl Ppu {
         let mut tiles_seen: u16 = 0;
         self.sprite_timeover_first_idx = 0;
         'time_eval: for (idx, s) in self.line_sprites.iter().enumerate() {
-            let mut sx = Self::sprite_x_signed(s.x);
+            let mut sx = s.x_signed;
             if sx == -256 {
                 sx = 0;
             }
-            let (w, _h) = self.get_sprite_pixel_size(&s.size);
-            let tiles_across = (w as i16) / 8;
+            let tiles_across = (s.width as i16) / 8;
             for k in 0..tiles_across {
                 let tx = sx + k * 8;
                 // Only tiles with -8 < X < 256 are counted.
@@ -960,26 +1000,8 @@ mod tests {
         ppu.vram[16] = 0x00;
         ppu.vram[17] = 0x00;
         ppu.line_sprites = vec![
-            SpriteData {
-                x: 0,
-                y: 0,
-                tile: 0,
-                palette: 4,
-                priority: 0,
-                flip_x: false,
-                flip_y: false,
-                size: SpriteSize::Small,
-            },
-            SpriteData {
-                x: 0,
-                y: 0,
-                tile: 0,
-                palette: 4,
-                priority: 1,
-                flip_x: false,
-                flip_y: false,
-                size: SpriteSize::Small,
-            },
+            ppu.build_sprite_data(0, 0, 0, 4, 0, false, false, SpriteSize::Small, 8, 8, 0),
+            ppu.build_sprite_data(0, 0, 0, 4, 1, false, false, SpriteSize::Small, 8, 8, 0),
         ];
         ppu
     }
