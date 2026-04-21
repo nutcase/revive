@@ -4800,10 +4800,7 @@ impl Bus {
             // 0x4212 - HVBJOY: H/V-Blank and Joypad busy flags
             0x4212 => {
                 // デバッグ: 強制値を返す（例: 0x80 なら VBlank=1, HBlank=0, JOYBUSY=0）
-                if let Some(force) = std::env::var("FORCE_4212")
-                    .ok()
-                    .and_then(|v| u8::from_str_radix(v.trim_start_matches("0x"), 16).ok())
-                {
+                if let Some(force) = crate::debug_flags::force_4212() {
                     return force;
                 }
                 let mut value = 0u8;
@@ -5189,7 +5186,7 @@ impl Bus {
             0x420C => {
                 // HDMAEN - H-blank DMA Enable
                 let old_hdma_enable = self.dma_controller.hdma_enable;
-                if std::env::var("TRACE_HDMA_ENABLE").is_ok() {
+                if crate::debug_flags::trace_hdma_enable() {
                     let frame = self.ppu.get_frame();
                     eprintln!(
                         "[HDMA-EN] frame={} PC={:06X} $420C <- {:02X}",
@@ -6139,17 +6136,14 @@ impl Bus {
             self.joy_busy_counter -= 1;
         }
         // Temporary: sample CPU PC during specific frames
-        if let Ok(range) = std::env::var("TRACE_CPU_PC_RANGE") {
-            let parts: Vec<u64> = range.split('-').filter_map(|s| s.parse().ok()).collect();
-            if parts.len() == 2 {
-                let frame = self.ppu.get_frame();
-                let sl = self.ppu.scanline;
-                if frame >= parts[0] && frame <= parts[1] && sl == 100 {
-                    eprintln!(
-                        "[CPU-PC] frame={} sl={} PC=0x{:06X} NMI_en={} INIDISP=0x{:02X}",
-                        frame, sl, self.last_cpu_pc, self.ppu.nmi_enabled, self.ppu.screen_display,
-                    );
-                }
+        if let Some((start, end)) = crate::debug_flags::trace_cpu_pc_range() {
+            let frame = self.ppu.get_frame();
+            let sl = self.ppu.scanline;
+            if frame >= start && frame <= end && sl == 100 {
+                eprintln!(
+                    "[CPU-PC] frame={} sl={} PC=0x{:06X} NMI_en={} INIDISP=0x{:02X}",
+                    frame, sl, self.last_cpu_pc, self.ppu.nmi_enabled, self.ppu.screen_display,
+                );
             }
         }
     }
@@ -6332,9 +6326,7 @@ impl Bus {
         }
 
         // Temporary trace: dump ch0 $210D writes for a specific frame
-        let trace_frame = std::env::var("TRACE_SCROLL_FRAME")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok());
+        let trace_frame = crate::debug_flags::trace_scroll_frame();
         let cur_frame = self.ppu.get_frame();
 
         // 書き込み（PPU writable or APU I/O）

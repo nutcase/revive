@@ -1,3 +1,5 @@
+use crate::debug_flags;
+
 pub const FRAME_WIDTH: usize = 320;
 pub const FRAME_HEIGHT: usize = 240;
 const FRAME_WIDTH_32_CELL: usize = 256;
@@ -251,8 +253,8 @@ impl Vdp {
             line_hscroll: [[0; 2]; FRAME_HEIGHT],
             line_cram: [[0; CRAM_COLORS]; FRAME_HEIGHT],
             line_vram: vec![[0; VRAM_SIZE]; FRAME_HEIGHT],
-            line_vram_latch_enabled: std::env::var_os("MEGADRIVE_DEBUG_LINE_VRAM_LATCH").is_some(),
-            debug_line_latch_next: std::env::var_os("MEGADRIVE_DEBUG_LINE_LATCH_NEXT").is_some(),
+            line_vram_latch_enabled: debug_flags::line_vram_latch(),
+            debug_line_latch_next: debug_flags::line_latch_next(),
             control_latch: None,
             access_addr: 0,
             access_mode: AccessMode::default(),
@@ -285,9 +287,8 @@ impl Vdp {
     }
 
     pub fn refresh_runtime_debug_config_from_env(&mut self) {
-        self.line_vram_latch_enabled =
-            std::env::var_os("MEGADRIVE_DEBUG_LINE_VRAM_LATCH").is_some();
-        self.debug_line_latch_next = std::env::var_os("MEGADRIVE_DEBUG_LINE_LATCH_NEXT").is_some();
+        self.line_vram_latch_enabled = debug_flags::line_vram_latch();
+        self.debug_line_latch_next = debug_flags::line_latch_next();
     }
 
     fn cycles_per_frame(&self) -> u64 {
@@ -796,7 +797,7 @@ impl Vdp {
 
     pub fn write_data_port(&mut self, value: u16) {
         if let Some(fill) = self.dma_fill_pending.take() {
-            let no_prewrite = std::env::var_os("MEGADRIVE_DEBUG_DMA_FILL_NO_PREWRITE").is_some();
+            let no_prewrite = debug_flags::dma_fill_no_prewrite();
             // DMA fill is triggered by a regular data-port write: apply the
             // initial write first, then stream fill bytes.
             if !no_prewrite {
@@ -804,8 +805,8 @@ impl Vdp {
                 self.advance_access_addr();
             }
             let fill_byte = (value & 0x00FF) as u8;
-            let fill_word = std::env::var_os("MEGADRIVE_DEBUG_DMA_FILL_WORD").is_some();
-            let lane_no_xor = std::env::var_os("MEGADRIVE_DEBUG_DMA_FILL_LANE_NO_XOR").is_some();
+            let fill_word = debug_flags::dma_fill_word();
+            let lane_no_xor = debug_flags::dma_fill_lane_no_xor();
             self.dma_fill_active = Some(DmaFillActive {
                 fill_byte,
                 fill_word,
@@ -1270,10 +1271,10 @@ impl Vdp {
 
     fn sprite_pattern_line0_enabled(&self) -> bool {
         let force_per_line = self.debug_sprite_flag(Self::DEBUG_SPRITE_PATTERN_PER_LINE_FLAG)
-            || std::env::var_os("MEGADRIVE_DEBUG_SPRITE_PATTERN_PER_LINE").is_some();
+            || debug_flags::sprite_pattern_per_line();
         !force_per_line
             && (self.debug_sprite_flag(Self::DEBUG_SPRITE_PATTERN_LINE0_FLAG)
-                || std::env::var_os("MEGADRIVE_DEBUG_SPRITE_PATTERN_LINE0").is_some())
+                || debug_flags::sprite_pattern_line0())
     }
 
     fn nametable_base_from_regs(regs: &[u8; REG_COUNT]) -> usize {
@@ -1582,55 +1583,41 @@ impl Vdp {
             return;
         }
 
-        let disable_plane_a = std::env::var_os("MEGADRIVE_DEBUG_DISABLE_PLANE_A").is_some();
-        let disable_plane_b = std::env::var_os("MEGADRIVE_DEBUG_DISABLE_PLANE_B").is_some();
-        let disable_window = std::env::var_os("MEGADRIVE_DEBUG_DISABLE_WINDOW").is_some()
-            || std::env::var_os("FORCE_WINDOW_OFF").is_some();
-        let disable_sprites = std::env::var_os("MEGADRIVE_DEBUG_DISABLE_SPRITES").is_some()
-            || std::env::var_os("DISABLE_SPRITES").is_some();
-        let invert_vscroll_a = std::env::var_os("MEGADRIVE_DEBUG_VSCROLL_INVERT_A").is_some();
-        let invert_vscroll_b = std::env::var_os("MEGADRIVE_DEBUG_VSCROLL_INVERT_B").is_some();
-        let debug_swap_vscroll_ab = std::env::var_os("MEGADRIVE_DEBUG_VSCROLL_SWAP_AB").is_some();
-        let plane_paged_layout = std::env::var_os("MEGADRIVE_DEBUG_PLANE_PAGED").is_some();
+        let disable_plane_a = debug_flags::disable_plane_a();
+        let disable_plane_b = debug_flags::disable_plane_b();
+        let disable_window = debug_flags::disable_window() || debug_flags::force_window_off();
+        let disable_sprites =
+            debug_flags::disable_sprites() || debug_flags::force_disable_sprites();
+        let invert_vscroll_a = debug_flags::invert_vscroll_a();
+        let invert_vscroll_b = debug_flags::invert_vscroll_b();
+        let debug_swap_vscroll_ab = debug_flags::vscroll_swap_ab();
+        let plane_paged_layout = debug_flags::plane_paged();
         let plane_paged_layout_a =
-            plane_paged_layout || std::env::var_os("MEGADRIVE_DEBUG_PLANE_A_PAGED").is_some();
+            plane_paged_layout || debug_flags::plane_a_paged();
         let plane_paged_layout_b =
-            plane_paged_layout || std::env::var_os("MEGADRIVE_DEBUG_PLANE_B_PAGED").is_some();
-        let plane_paged_xmajor = std::env::var_os("MEGADRIVE_DEBUG_PLANE_PAGED_XMAJOR").is_some();
+            plane_paged_layout || debug_flags::plane_b_paged();
+        let plane_paged_xmajor = debug_flags::plane_paged_xmajor();
         let plane_paged_xmajor_a = plane_paged_xmajor
-            || std::env::var_os("MEGADRIVE_DEBUG_PLANE_A_PAGED_XMAJOR").is_some();
+            || debug_flags::plane_a_paged_xmajor();
         let plane_paged_xmajor_b = plane_paged_xmajor
-            || std::env::var_os("MEGADRIVE_DEBUG_PLANE_B_PAGED_XMAJOR").is_some();
-        let force_plane_live_vram = std::env::var_os("MEGADRIVE_DEBUG_PLANE_LIVE_VRAM").is_some();
+            || debug_flags::plane_b_paged_xmajor();
+        let force_plane_live_vram = debug_flags::plane_live_vram();
         let use_plane_line_latch = self.line_vram_latch_enabled
-            && std::env::var_os("MEGADRIVE_DEBUG_PLANE_LINE_LATCH").is_some();
-        let live_cram = std::env::var_os("MEGADRIVE_DEBUG_LIVE_CRAM").is_some();
-        let line_offset = std::env::var("MEGADRIVE_DEBUG_LINE_OFFSET")
-            .ok()
-            .and_then(|v| v.parse::<isize>().ok())
-            .unwrap_or(0);
-        let bottom_bg_mask = std::env::var_os("MEGADRIVE_DEBUG_BOTTOM_BG_MASK").is_some();
-        let hscroll_live = std::env::var_os("MEGADRIVE_DEBUG_HSCROLL_LIVE").is_some();
-        let disable_64x32_paged =
-            std::env::var_os("MEGADRIVE_DEBUG_DISABLE_64X32_PAGED").is_some();
-        let disable_64x32_paged_a =
-            std::env::var_os("MEGADRIVE_DEBUG_DISABLE_64X32_PAGED_A").is_some();
-        let disable_64x32_paged_b =
-            std::env::var_os("MEGADRIVE_DEBUG_DISABLE_64X32_PAGED_B").is_some();
-        let debug_plane_a_64x32_paged =
-            std::env::var_os("MEGADRIVE_DEBUG_PLANE_A_64X32_PAGED").is_some();
-        let debug_plane_b_64x32_paged =
-            std::env::var_os("MEGADRIVE_DEBUG_PLANE_B_64X32_PAGED").is_some();
-        let disable_comix_roll_fix =
-            std::env::var_os("MEGADRIVE_DEBUG_DISABLE_COMIX_ROLL_FIX").is_some();
-        let comix_roll_offset = std::env::var("MEGADRIVE_DEBUG_COMIX_ROLL_Y")
-            .ok()
-            .and_then(|v| v.parse::<i16>().ok())
-            .unwrap_or(0);
+            && debug_flags::plane_line_latch();
+        let live_cram = debug_flags::live_cram();
+        let line_offset = debug_flags::line_offset();
+        let bottom_bg_mask = debug_flags::bottom_bg_mask();
+        let hscroll_live = debug_flags::hscroll_live();
+        let disable_64x32_paged = debug_flags::disable_64x32_paged();
+        let disable_64x32_paged_a = debug_flags::disable_64x32_paged_a();
+        let disable_64x32_paged_b = debug_flags::disable_64x32_paged_b();
+        let debug_plane_a_64x32_paged = debug_flags::plane_a_64x32_paged();
+        let debug_plane_b_64x32_paged = debug_flags::plane_b_64x32_paged();
+        let disable_comix_roll_fix = debug_flags::disable_comix_roll_fix();
+        let comix_roll_offset = debug_flags::comix_roll_y();
         let disable_comix_roll_sparse_mask =
-            std::env::var_os("MEGADRIVE_DEBUG_DISABLE_COMIX_ROLL_SPARSE_MASK").is_some();
-        let ignore_plane_priority =
-            std::env::var_os("MEGADRIVE_DEBUG_IGNORE_PLANE_PRIORITY").is_some();
+            debug_flags::disable_comix_roll_sparse_mask();
+        let ignore_plane_priority = debug_flags::ignore_plane_priority();
         let mut plane_meta = std::mem::take(&mut self.render_plane_meta);
         if plane_meta.len() != FRAME_WIDTH * FRAME_HEIGHT {
             plane_meta.resize(FRAME_WIDTH * FRAME_HEIGHT, 0);
@@ -1885,15 +1872,8 @@ impl Vdp {
         }
 
         if comix_title_roll_any && !disable_comix_roll_sparse_mask {
-            let min_pixels = std::env::var("MEGADRIVE_DEBUG_COMIX_ROLL_MIN_PIXELS")
-                .ok()
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or((FRAME_WIDTH * 3) / 5);
-            let run_required = std::env::var("MEGADRIVE_DEBUG_COMIX_ROLL_MIN_RUN")
-                .ok()
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(6)
-                .max(1);
+            let min_pixels = debug_flags::comix_roll_min_pixels();
+            let run_required = debug_flags::comix_roll_min_run().max(1);
             let search_start = (comix_title_roll_active_height / 3).max(48);
             let search_end = comix_title_roll_active_height.min(FRAME_HEIGHT);
             let mut run = 0usize;
@@ -1928,20 +1908,14 @@ impl Vdp {
         let max_sat_sprites = if self.h40_mode() { 80usize } else { 64usize };
         let sat_use_line_latched = self.line_vram_latch_enabled
             && (self.debug_sat_flag(Self::DEBUG_SAT_LINE_LATCH_FLAG)
-                || std::env::var_os("MEGADRIVE_DEBUG_SAT_LINE_LATCH").is_some());
+                || debug_flags::sat_line_latch());
         let sat_use_live = self.debug_sat_flag(Self::DEBUG_SAT_LIVE_FLAG)
-            || std::env::var_os("MEGADRIVE_DEBUG_SAT_LIVE").is_some()
+            || debug_flags::sat_live()
             || !sat_use_line_latched;
         let sat_per_line = self.debug_sat_flag(Self::DEBUG_SAT_PER_LINE_FLAG)
-            || std::env::var_os("MEGADRIVE_DEBUG_SAT_PER_LINE").is_some();
-        let sprite_x_offset = std::env::var("MEGADRIVE_DEBUG_SPRITE_X_OFFSET")
-            .ok()
-            .and_then(|v| v.parse::<i32>().ok())
-            .unwrap_or(0);
-        let sprite_y_offset = std::env::var("MEGADRIVE_DEBUG_SPRITE_Y_OFFSET")
-            .ok()
-            .and_then(|v| v.parse::<i32>().ok())
-            .unwrap_or(0);
+            || debug_flags::sat_per_line();
+        let sprite_x_offset = debug_flags::sprite_x_offset();
+        let sprite_y_offset = debug_flags::sprite_y_offset();
         if sat_per_line {
             self.render_sprites_per_line(
                 plane_meta,
@@ -2021,10 +1995,10 @@ impl Vdp {
         sprite_x_offset: i32,
         sprite_y_offset: i32,
     ) {
-        let swap_size = std::env::var_os("MEGADRIVE_DEBUG_SPRITE_SWAP_SIZE").is_some();
+        let swap_size = debug_flags::sprite_swap_size();
         let sprite_pattern_line0 = self.sprite_pattern_line0_enabled();
-        let sprite_row_major = std::env::var_os("MEGADRIVE_DEBUG_SPRITE_ROW_MAJOR").is_some();
-        let disable_mask_sprite = std::env::var_os("MEGADRIVE_DEBUG_DISABLE_SPRITE_MASK").is_some();
+        let sprite_row_major = debug_flags::sprite_row_major();
+        let disable_mask_sprite = debug_flags::disable_sprite_mask();
 
         let mut sprite_filled = std::mem::take(&mut self.render_sprite_filled);
         if sprite_filled.len() != FRAME_WIDTH * FRAME_HEIGHT {
@@ -2290,7 +2264,7 @@ impl Vdp {
         if self.interlace_mode_enabled() {
             y >>= 1;
         }
-        let swap_size = std::env::var_os("MEGADRIVE_DEBUG_SPRITE_SWAP_SIZE").is_some();
+        let swap_size = debug_flags::sprite_swap_size();
         let (width_tiles, height_tiles) = if swap_size {
             (
                 ((size_link >> 8) & 0x3) as usize + 1,
@@ -2309,10 +2283,10 @@ impl Vdp {
         let vflip = (attr & 0x1000) != 0;
         let width_px = width_tiles * 8;
         let height_px = height_tiles * 8;
-        let disable_mask_sprite = std::env::var_os("MEGADRIVE_DEBUG_DISABLE_SPRITE_MASK").is_some();
+        let disable_mask_sprite = debug_flags::disable_sprite_mask();
         let is_mask_sprite = (x_word & 0x01FF) == 0 && !disable_mask_sprite;
         let sprite_pattern_line0 = self.sprite_pattern_line0_enabled();
-        let sprite_row_major = std::env::var_os("MEGADRIVE_DEBUG_SPRITE_ROW_MAJOR").is_some();
+        let sprite_row_major = debug_flags::sprite_row_major();
 
         for sy in 0..height_px {
             let src_y = if vflip { height_px - 1 - sy } else { sy };

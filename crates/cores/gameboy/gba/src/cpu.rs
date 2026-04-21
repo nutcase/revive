@@ -1,5 +1,6 @@
 use crate::bus::{GbaBus, IRQ_KEYPAD};
 use crate::state::{StateReader, StateWriter};
+#[cfg(feature = "runtime-debug-trace")]
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -60,25 +61,41 @@ static TRACE_IRQ_COUNT: AtomicU32 = AtomicU32::new(0);
 static TRACE_IRQ_CODE_COUNT: AtomicU32 = AtomicU32::new(0);
 static TRACE_BAD_PC_COUNT: AtomicU32 = AtomicU32::new(0);
 
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_SWI_ENABLED: OnceLock<bool> = OnceLock::new();
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_UNKNOWN_ENABLED: OnceLock<bool> = OnceLock::new();
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_BRANCH_ENABLED: OnceLock<bool> = OnceLock::new();
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_IRQ_ENABLED: OnceLock<bool> = OnceLock::new();
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_IRQ_CODE_ENABLED: OnceLock<bool> = OnceLock::new();
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_BAD_PC_ENABLED: OnceLock<bool> = OnceLock::new();
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_IRQ_PTR_ENABLED: OnceLock<bool> = OnceLock::new();
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_SP_ENABLED: OnceLock<bool> = OnceLock::new();
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_PC_TARGET: OnceLock<Option<u32>> = OnceLock::new();
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_PC_RANGE_START: OnceLock<Option<u32>> = OnceLock::new();
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_PC_RANGE_END: OnceLock<Option<u32>> = OnceLock::new();
 static TRACE_PC_COUNT: AtomicU32 = AtomicU32::new(0);
 static TRACE_PC_MATCH_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_PC_SKIP: OnceLock<u32> = OnceLock::new();
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_PC_SP_MIN: OnceLock<Option<u32>> = OnceLock::new();
 static TRACE_SP_COUNT: AtomicU32 = AtomicU32::new(0);
 static TRACE_IRQ_PTR_COUNT: AtomicU32 = AtomicU32::new(0);
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_SP_MIN: OnceLock<Option<u32>> = OnceLock::new();
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_LIMIT: OnceLock<u32> = OnceLock::new();
+#[cfg(feature = "runtime-debug-trace")]
 static TRACE_STEP_HOOKS: OnceLock<TraceStepHooks> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy)]
@@ -88,6 +105,14 @@ struct TraceStepHooks {
     bad_pc: bool,
     irq_ptr: bool,
 }
+
+#[cfg(not(feature = "runtime-debug-trace"))]
+static TRACE_STEP_HOOKS_DISABLED: TraceStepHooks = TraceStepHooks {
+    pc: false,
+    sp: false,
+    bad_pc: false,
+    irq_ptr: false,
+};
 
 #[derive(Debug, Clone, Copy)]
 struct NoBiosIrqState {
@@ -3093,6 +3118,9 @@ impl Arm7Tdmi {
     }
 }
 
+#[cfg(feature = "runtime-debug-trace")]
+#[cold]
+#[inline(never)]
 fn env_flag(name: &str) -> bool {
     let value = match std::env::var(name) {
         Ok(value) => value,
@@ -3107,107 +3135,230 @@ fn env_flag(name: &str) -> bool {
         || lowered == "no")
 }
 
+#[inline(always)]
 fn trace_swi_enabled() -> bool {
-    *TRACE_SWI_ENABLED.get_or_init(|| env_flag("GBA_TRACE_SWI"))
-}
-
-fn trace_unknown_enabled() -> bool {
-    *TRACE_UNKNOWN_ENABLED.get_or_init(|| env_flag("GBA_TRACE_UNKNOWN"))
-}
-
-fn trace_branch_enabled() -> bool {
-    *TRACE_BRANCH_ENABLED.get_or_init(|| env_flag("GBA_TRACE_BRANCH"))
-}
-
-fn trace_irq_enabled() -> bool {
-    *TRACE_IRQ_ENABLED.get_or_init(|| env_flag("GBA_TRACE_IRQ"))
-}
-
-fn trace_irq_code_enabled() -> bool {
-    *TRACE_IRQ_CODE_ENABLED.get_or_init(|| env_flag("GBA_TRACE_IRQ_CODE"))
-}
-
-fn trace_bad_pc_enabled() -> bool {
-    *TRACE_BAD_PC_ENABLED.get_or_init(|| env_flag("GBA_TRACE_BAD_PC"))
-}
-
-fn trace_irq_ptr_enabled() -> bool {
-    *TRACE_IRQ_PTR_ENABLED.get_or_init(|| env_flag("GBA_TRACE_IRQ_PTR"))
-}
-
-fn trace_sp_enabled() -> bool {
-    *TRACE_SP_ENABLED.get_or_init(|| env_flag("GBA_TRACE_SP"))
-}
-
-fn trace_pc_target() -> Option<u32> {
-    *TRACE_PC_TARGET.get_or_init(|| {
-        std::env::var("GBA_TRACE_PC")
-            .ok()
-            .and_then(|value| parse_u32_auto_radix(&value))
-    })
-}
-
-fn trace_pc_range() -> Option<(u32, u32)> {
-    let start = *TRACE_PC_RANGE_START.get_or_init(|| {
-        std::env::var("GBA_TRACE_PC_START")
-            .ok()
-            .and_then(|value| parse_u32_auto_radix(&value))
-    });
-    let end = *TRACE_PC_RANGE_END.get_or_init(|| {
-        std::env::var("GBA_TRACE_PC_END")
-            .ok()
-            .and_then(|value| parse_u32_auto_radix(&value))
-    });
-    match (start, end) {
-        (Some(start), Some(end)) if start <= end => Some((start, end)),
-        _ => None,
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        false
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        *TRACE_SWI_ENABLED.get_or_init(|| env_flag("GBA_TRACE_SWI"))
     }
 }
 
+#[inline(always)]
+fn trace_unknown_enabled() -> bool {
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        false
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        *TRACE_UNKNOWN_ENABLED.get_or_init(|| env_flag("GBA_TRACE_UNKNOWN"))
+    }
+}
+
+#[inline(always)]
+fn trace_branch_enabled() -> bool {
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        false
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        *TRACE_BRANCH_ENABLED.get_or_init(|| env_flag("GBA_TRACE_BRANCH"))
+    }
+}
+
+#[inline(always)]
+fn trace_irq_enabled() -> bool {
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        false
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        *TRACE_IRQ_ENABLED.get_or_init(|| env_flag("GBA_TRACE_IRQ"))
+    }
+}
+
+#[inline(always)]
+fn trace_irq_code_enabled() -> bool {
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        false
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        *TRACE_IRQ_CODE_ENABLED.get_or_init(|| env_flag("GBA_TRACE_IRQ_CODE"))
+    }
+}
+
+#[inline(always)]
+fn trace_bad_pc_enabled() -> bool {
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        false
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        *TRACE_BAD_PC_ENABLED.get_or_init(|| env_flag("GBA_TRACE_BAD_PC"))
+    }
+}
+
+#[inline(always)]
+fn trace_irq_ptr_enabled() -> bool {
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        false
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        *TRACE_IRQ_PTR_ENABLED.get_or_init(|| env_flag("GBA_TRACE_IRQ_PTR"))
+    }
+}
+
+#[inline(always)]
+fn trace_sp_enabled() -> bool {
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        false
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        *TRACE_SP_ENABLED.get_or_init(|| env_flag("GBA_TRACE_SP"))
+    }
+}
+
+#[inline(always)]
+fn trace_pc_target() -> Option<u32> {
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        None
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        *TRACE_PC_TARGET.get_or_init(|| {
+            std::env::var("GBA_TRACE_PC")
+                .ok()
+                .and_then(|value| parse_u32_auto_radix(&value))
+        })
+    }
+}
+
+#[inline(always)]
+fn trace_pc_range() -> Option<(u32, u32)> {
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        None
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        let start = *TRACE_PC_RANGE_START.get_or_init(|| {
+            std::env::var("GBA_TRACE_PC_START")
+                .ok()
+                .and_then(|value| parse_u32_auto_radix(&value))
+        });
+        let end = *TRACE_PC_RANGE_END.get_or_init(|| {
+            std::env::var("GBA_TRACE_PC_END")
+                .ok()
+                .and_then(|value| parse_u32_auto_radix(&value))
+        });
+        match (start, end) {
+            (Some(start), Some(end)) if start <= end => Some((start, end)),
+            _ => None,
+        }
+    }
+}
+
+#[inline(always)]
 fn trace_pc_skip() -> u32 {
-    *TRACE_PC_SKIP.get_or_init(|| {
-        std::env::var("GBA_TRACE_PC_SKIP")
-            .ok()
-            .and_then(|value| parse_u32_auto_radix(&value))
-            .unwrap_or(0)
-    })
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        0
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        *TRACE_PC_SKIP.get_or_init(|| {
+            std::env::var("GBA_TRACE_PC_SKIP")
+                .ok()
+                .and_then(|value| parse_u32_auto_radix(&value))
+                .unwrap_or(0)
+        })
+    }
 }
 
+#[inline(always)]
 fn trace_limit() -> u32 {
-    *TRACE_LIMIT.get_or_init(|| {
-        std::env::var("GBA_TRACE_LIMIT")
-            .ok()
-            .and_then(|value| value.parse::<u32>().ok())
-            .filter(|value| *value > 0)
-            .unwrap_or(TRACE_LIMIT_DEFAULT)
-    })
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        TRACE_LIMIT_DEFAULT
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        *TRACE_LIMIT.get_or_init(|| {
+            std::env::var("GBA_TRACE_LIMIT")
+                .ok()
+                .and_then(|value| value.parse::<u32>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(TRACE_LIMIT_DEFAULT)
+        })
+    }
 }
 
+#[inline(always)]
 fn trace_pc_sp_min() -> Option<u32> {
-    *TRACE_PC_SP_MIN.get_or_init(|| {
-        std::env::var("GBA_TRACE_PC_SP_MIN")
-            .ok()
-            .and_then(|value| parse_u32_auto_radix(&value))
-    })
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        None
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        *TRACE_PC_SP_MIN.get_or_init(|| {
+            std::env::var("GBA_TRACE_PC_SP_MIN")
+                .ok()
+                .and_then(|value| parse_u32_auto_radix(&value))
+        })
+    }
 }
 
+#[inline(always)]
 fn trace_sp_min() -> Option<u32> {
-    *TRACE_SP_MIN.get_or_init(|| {
-        std::env::var("GBA_TRACE_SP_MIN")
-            .ok()
-            .and_then(|value| parse_u32_auto_radix(&value))
-    })
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        None
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        *TRACE_SP_MIN.get_or_init(|| {
+            std::env::var("GBA_TRACE_SP_MIN")
+                .ok()
+                .and_then(|value| parse_u32_auto_radix(&value))
+        })
+    }
 }
 
+#[inline(always)]
 fn trace_step_hooks() -> &'static TraceStepHooks {
-    TRACE_STEP_HOOKS.get_or_init(|| TraceStepHooks {
-        pc: trace_pc_target().is_some() || trace_pc_range().is_some(),
-        sp: trace_sp_enabled(),
-        bad_pc: trace_bad_pc_enabled(),
-        irq_ptr: trace_irq_ptr_enabled(),
-    })
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        &TRACE_STEP_HOOKS_DISABLED
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        TRACE_STEP_HOOKS.get_or_init(|| TraceStepHooks {
+            pc: trace_pc_target().is_some() || trace_pc_range().is_some(),
+            sp: trace_sp_enabled(),
+            bad_pc: trace_bad_pc_enabled(),
+            irq_ptr: trace_irq_ptr_enabled(),
+        })
+    }
 }
 
+#[cfg(feature = "runtime-debug-trace")]
+#[cold]
+#[inline(never)]
 fn parse_u32_auto_radix(value: &str) -> Option<u32> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -3231,12 +3382,21 @@ fn parse_u32_auto_radix(value: &str) -> Option<u32> {
     trimmed.parse::<u32>().ok()
 }
 
+#[inline(always)]
 fn take_trace_slot(counter: &AtomicU32) -> Option<u32> {
-    let slot = counter.fetch_add(1, Ordering::Relaxed);
-    if slot < trace_limit() {
-        Some(slot)
-    } else {
+    #[cfg(not(feature = "runtime-debug-trace"))]
+    {
+        let _ = counter;
         None
+    }
+    #[cfg(feature = "runtime-debug-trace")]
+    {
+        let slot = counter.fetch_add(1, Ordering::Relaxed);
+        if slot < trace_limit() {
+            Some(slot)
+        } else {
+            None
+        }
     }
 }
 

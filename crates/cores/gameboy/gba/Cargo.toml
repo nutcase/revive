@@ -3,5 +3,9 @@ name = "emulator-gba"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+runtime-debug-trace = []
+
 [dependencies]
 emulator-core = { path = "../core" }

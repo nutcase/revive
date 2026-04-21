@@ -83,10 +83,15 @@ cargo run -- <rom> --cheats cheats/custom.json
 
 ## Apple Silicon Builds
 
-Revive includes aliases that target `aarch64-apple-darwin` with
-`target-cpu=native`.
+Revive keeps development and play builds separate. The default `cargo run`
+path is still useful while editing, but the `release-native` profile is the
+intended executable build: `opt-level = 3`, thin LTO, one codegen unit, and
+stripped debug info. On Apple Silicon, the Apple aliases target
+`aarch64-apple-darwin` with `target-cpu=native`.
 
 ```sh
+cargo run-native -- <rom>
+cargo build-native
 cargo run-apple -- --select
 cargo run-apple -- <rom>
 cargo build-apple
@@ -94,6 +99,15 @@ cargo build-apple
 
 The normal `cargo run` path already builds core crates with `opt-level = 3` in
 the dev profile, but the release-oriented aliases are better for actual play.
+
+Runtime debug and trace environment flags are disabled in normal optimized
+builds for hot-path performance. Enable them only for investigations:
+
+```sh
+cargo run-apple -p revive-cli --features snes-runtime-debug-flags -- <rom>
+cargo run-apple -p revive-cli --features megadrive-runtime-debug-flags -- <rom>
+cargo run-apple -p revive-cli --features gba-runtime-debug-trace -- <rom>
+```
 
 ## ROM Detection
 

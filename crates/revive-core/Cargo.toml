@@ -7,6 +7,12 @@ edition = "2021"
 name = "revive_core"
 path = "src/lib.rs"
 
+[features]
+default = []
+snes-runtime-debug-flags = ["snes-core/runtime-debug-flags"]
+megadrive-runtime-debug-flags = ["megadrive-core/runtime-debug-flags"]
+gba-runtime-debug-trace = ["emulator-gba/runtime-debug-trace"]
+
 [dependencies]
 emulator-core = { path = "../cores/gameboy/core" }
 emulator-gb = { path = "../cores/gameboy/gb" }

@@ -937,7 +937,7 @@ impl Emulator {
                 // Keep auto-joy timing aligned with the PPU's own v_blank transition.
                 if !was_vblank && is_vblank {
                     self.bus.on_vblank_start();
-                    if std::env::var_os("TRACE_VBLANK_PC").is_some() {
+                    if crate::debug_flags::trace_vblank_pc() {
                         let pc = self.cpu.get_pc();
                         println!(
                             "[TRACE_VBLANK_PC] frame={} PC={:02X}:{:04X} sl={} cyc={}",

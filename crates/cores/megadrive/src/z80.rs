@@ -2298,8 +2298,7 @@ impl Z80 {
             return;
         };
         let aligned = local & !1;
-        let immediate_byte_commit =
-            std::env::var_os("MEGADRIVE_DEBUG_VDP_BYTE_IMMEDIATE").is_some();
+        let immediate_byte_commit = crate::debug_flags::vdp_byte_immediate();
         let low_byte_write = (local & 1) != 0;
         let next = match aligned {
             0xC00000 | 0xC00002 => {

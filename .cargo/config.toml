@@ -2,8 +2,10 @@
 CMAKE_POLICY_VERSION_MINIMUM = "3.5"
 
 [alias]
-build-apple = "build --release --target aarch64-apple-darwin"
-run-apple = "run --release --target aarch64-apple-darwin"
+build-native = "build --profile release-native"
+run-native = "run --profile release-native"
+build-apple = "build --profile release-native --target aarch64-apple-darwin"
+run-apple = "run --profile release-native --target aarch64-apple-darwin"
 
 [target.aarch64-apple-darwin]
 rustflags = [

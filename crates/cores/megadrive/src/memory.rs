@@ -409,8 +409,7 @@ impl MemoryMap {
     pub fn write_u8(&mut self, addr: u32, value: u8) {
         let addr = Self::mask_address(addr);
         if let Some(port) = decode_vdp_port(addr) {
-            let immediate_byte_commit =
-                std::env::var_os("MEGADRIVE_DEBUG_VDP_BYTE_IMMEDIATE").is_some();
+            let immediate_byte_commit = crate::debug_flags::vdp_byte_immediate();
             let low_byte_write = (addr & 1) != 0;
             let next = match port {
                 VdpPort::Data => {

@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod cartridge;
 pub mod cpu;
+mod debug_flags;
 pub mod input;
 pub mod memory;
 pub mod system;

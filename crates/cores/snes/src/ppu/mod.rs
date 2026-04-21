@@ -1719,7 +1719,7 @@ impl Ppu {
             self.oam_internal_addr = (self.oam_addr & 0x01FF) << 1;
             self.refresh_oam_eval_base_from_internal_addr();
         }
-        if std::env::var_os("TRACE_VBLANK").is_some() {
+        if crate::debug_flags::trace_vblank() {
             use std::sync::atomic::{AtomicU32, Ordering};
             static COUNT: AtomicU32 = AtomicU32::new(0);
             let n = COUNT.fetch_add(1, Ordering::Relaxed);
@@ -2118,7 +2118,7 @@ impl Ppu {
         if prev_blank && !new_blank {
             self.oam_internal_addr = (self.oam_addr & 0x01FF) << 1;
             self.refresh_oam_eval_base_from_internal_addr();
-            if std::env::var_os("TRACE_OAM_RESET").is_some() && !crate::debug_flags::quiet() {
+            if crate::debug_flags::trace_oam_reset() && !crate::debug_flags::quiet() {
                 println!(
                     "[OAM-RESET] scanline={} frame={} oam_addr=0x{:03X} internal=0x{:03X}",
                     self.scanline, self.frame, self.oam_addr, self.oam_internal_addr

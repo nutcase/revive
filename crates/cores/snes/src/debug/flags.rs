@@ -2,46 +2,106 @@
 
 use std::sync::OnceLock;
 
+#[cold]
+#[inline(never)]
 fn env_flag(key: &str, default: bool) -> bool {
-    std::env::var(key)
-        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "on" | "ON"))
-        .unwrap_or(default)
+    #[cfg(not(feature = "runtime-debug-flags"))]
+    {
+        let _ = key;
+        default
+    }
+    #[cfg(feature = "runtime-debug-flags")]
+    {
+        std::env::var(key)
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "on" | "ON"))
+            .unwrap_or(default)
+    }
 }
 
+#[cold]
+#[inline(never)]
 fn env_present(key: &str) -> bool {
-    std::env::var_os(key).is_some()
+    #[cfg(not(feature = "runtime-debug-flags"))]
+    {
+        let _ = key;
+        false
+    }
+    #[cfg(feature = "runtime-debug-flags")]
+    {
+        std::env::var_os(key).is_some()
+    }
 }
 
+#[cold]
+#[inline(never)]
 fn env_u16(key: &str, default: u16) -> u16 {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<u16>().ok())
-        .unwrap_or(default)
-}
-
-fn env_u32(key: &str, default: u32) -> u32 {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(default)
-}
-
-fn env_u8_opt(key: &str) -> Option<u8> {
-    std::env::var(key).ok().and_then(|v| {
-        let v = v.trim();
-        u8::from_str_radix(v.trim_start_matches("0x"), 16)
+    #[cfg(not(feature = "runtime-debug-flags"))]
+    {
+        let _ = key;
+        default
+    }
+    #[cfg(feature = "runtime-debug-flags")]
+    {
+        std::env::var(key)
             .ok()
-            .or_else(|| v.parse().ok())
-    })
+            .and_then(|v| v.parse::<u16>().ok())
+            .unwrap_or(default)
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn env_u32(key: &str, default: u32) -> u32 {
+    #[cfg(not(feature = "runtime-debug-flags"))]
+    {
+        let _ = key;
+        default
+    }
+    #[cfg(feature = "runtime-debug-flags")]
+    {
+        std::env::var(key)
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(default)
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn env_u8_opt(key: &str) -> Option<u8> {
+    #[cfg(not(feature = "runtime-debug-flags"))]
+    {
+        let _ = key;
+        None
+    }
+    #[cfg(feature = "runtime-debug-flags")]
+    {
+        std::env::var(key).ok().and_then(|v| {
+            let v = v.trim();
+            u8::from_str_radix(v.trim_start_matches("0x"), 16)
+                .ok()
+                .or_else(|| v.parse().ok())
+        })
+    }
 }
 
 // --- Mode 7 z-rank tunables (i16 semantics but parsed as u16 then clamped) ---
+#[cold]
+#[inline(never)]
 fn env_i16(key: &str, default: i16) -> i16 {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<i32>().ok())
-        .map(|n| n.clamp(i16::MIN as i32, i16::MAX as i32) as i16)
-        .unwrap_or(default)
+    #[cfg(not(feature = "runtime-debug-flags"))]
+    {
+        let _ = key;
+        default
+    }
+    #[cfg(feature = "runtime-debug-flags")]
+    {
+        std::env::var(key)
+            .ok()
+            .and_then(|v| v.parse::<i32>().ok())
+            .map(|n| n.clamp(i16::MIN as i32, i16::MAX as i32) as i16)
+            .unwrap_or(default)
+    }
 }
 
 // ============================================================
@@ -51,6 +111,13 @@ fn env_i16(key: &str, default: i16) -> i16 {
 /// Boolean flag backed by `env_flag(key, default)`.
 macro_rules! debug_flag {
     ($fn_name:ident, $env_key:literal, $default:expr) => {
+        #[cfg(not(feature = "runtime-debug-flags"))]
+        #[inline(always)]
+        pub fn $fn_name() -> bool {
+            $default
+        }
+
+        #[cfg(feature = "runtime-debug-flags")]
         pub fn $fn_name() -> bool {
             static ON: OnceLock<bool> = OnceLock::new();
             *ON.get_or_init(|| env_flag($env_key, $default))
@@ -61,6 +128,13 @@ macro_rules! debug_flag {
 /// Boolean flag backed by `env_present(key)` (true if env var exists).
 macro_rules! debug_flag_present {
     ($fn_name:ident, $env_key:literal) => {
+        #[cfg(not(feature = "runtime-debug-flags"))]
+        #[inline(always)]
+        pub fn $fn_name() -> bool {
+            false
+        }
+
+        #[cfg(feature = "runtime-debug-flags")]
         pub fn $fn_name() -> bool {
             static ON: OnceLock<bool> = OnceLock::new();
             *ON.get_or_init(|| env_present($env_key))
@@ -71,6 +145,13 @@ macro_rules! debug_flag_present {
 /// u16 tunable backed by `env_u16(key, default)`.
 macro_rules! debug_u16 {
     ($fn_name:ident, $env_key:literal, $default:expr) => {
+        #[cfg(not(feature = "runtime-debug-flags"))]
+        #[inline(always)]
+        pub fn $fn_name() -> u16 {
+            $default
+        }
+
+        #[cfg(feature = "runtime-debug-flags")]
         pub fn $fn_name() -> u16 {
             static V: OnceLock<u16> = OnceLock::new();
             *V.get_or_init(|| env_u16($env_key, $default))
@@ -81,6 +162,13 @@ macro_rules! debug_u16 {
 /// u32 tunable backed by `env_u32(key, default)`.
 macro_rules! debug_u32 {
     ($fn_name:ident, $env_key:literal, $default:expr) => {
+        #[cfg(not(feature = "runtime-debug-flags"))]
+        #[inline(always)]
+        pub fn $fn_name() -> u32 {
+            $default
+        }
+
+        #[cfg(feature = "runtime-debug-flags")]
         pub fn $fn_name() -> u32 {
             static V: OnceLock<u32> = OnceLock::new();
             *V.get_or_init(|| env_u32($env_key, $default))
@@ -91,6 +179,13 @@ macro_rules! debug_u32 {
 /// Optional u8 backed by `env_u8_opt(key)`.
 macro_rules! debug_u8_opt {
     ($fn_name:ident, $env_key:literal) => {
+        #[cfg(not(feature = "runtime-debug-flags"))]
+        #[inline(always)]
+        pub fn $fn_name() -> Option<u8> {
+            None
+        }
+
+        #[cfg(feature = "runtime-debug-flags")]
         pub fn $fn_name() -> Option<u8> {
             static VAL: OnceLock<Option<u8>> = OnceLock::new();
             *VAL.get_or_init(|| env_u8_opt($env_key))
@@ -101,6 +196,13 @@ macro_rules! debug_u8_opt {
 /// i16 tunable backed by `env_i16(key, default)`.
 macro_rules! debug_i16 {
     ($fn_name:ident, $env_key:literal, $default:expr) => {
+        #[cfg(not(feature = "runtime-debug-flags"))]
+        #[inline(always)]
+        pub fn $fn_name() -> i16 {
+            $default
+        }
+
+        #[cfg(feature = "runtime-debug-flags")]
         pub fn $fn_name() -> i16 {
             static V: OnceLock<i16> = OnceLock::new();
             *V.get_or_init(|| env_i16($env_key, $default))
@@ -256,6 +358,10 @@ debug_flag_present!(rdnmi_sticky, "RDNMI_STICKY");
 debug_flag_present!(trace_4212_values, "TRACE_4212_VALUES");
 debug_flag_present!(debug_joybusy, "DEBUG_JOYBUSY");
 debug_flag_present!(force_mdma_now, "FORCE_MDMA_NOW");
+debug_flag_present!(trace_hdma_enable, "TRACE_HDMA_ENABLE");
+debug_flag_present!(trace_vblank, "TRACE_VBLANK");
+debug_flag_present!(trace_vblank_pc, "TRACE_VBLANK_PC");
+debug_flag_present!(trace_oam_reset, "TRACE_OAM_RESET");
 debug_flag_present!(trace_autojoy, "TRACE_AUTOJOY");
 debug_flag_present!(dma_probe, "DMA_PROBE");
 debug_flag_present!(trace_dma_dest, "TRACE_DMA_DEST");
@@ -331,6 +437,7 @@ debug_u32!(trace_apu_handshake_limit, "TRACE_APU_HANDSHAKE_LIMIT", 256);
 // ============================================================
 
 debug_u8_opt!(debug_force_tm, "DEBUG_FORCE_TM");
+debug_u8_opt!(force_4212, "FORCE_4212");
 
 // ============================================================
 // i16 tunables (Mode 7 z-rank)
@@ -346,6 +453,38 @@ debug_i16!(m7_z_bg2, "M7_Z_BG2", 10);
 // ============================================================
 // Functions with custom logic (not macro-replaceable)
 // ============================================================
+
+#[cfg(not(feature = "runtime-debug-flags"))]
+#[inline(always)]
+pub fn trace_cpu_pc_range() -> Option<(u64, u64)> {
+    None
+}
+
+#[cfg(feature = "runtime-debug-flags")]
+pub fn trace_cpu_pc_range() -> Option<(u64, u64)> {
+    static RANGE: OnceLock<Option<(u64, u64)>> = OnceLock::new();
+    *RANGE.get_or_init(|| {
+        let value = std::env::var("TRACE_CPU_PC_RANGE").ok()?;
+        let (start, end) = value.split_once('-')?;
+        Some((start.parse().ok()?, end.parse().ok()?))
+    })
+}
+
+#[cfg(not(feature = "runtime-debug-flags"))]
+#[inline(always)]
+pub fn trace_scroll_frame() -> Option<u64> {
+    None
+}
+
+#[cfg(feature = "runtime-debug-flags")]
+pub fn trace_scroll_frame() -> Option<u64> {
+    static FRAME: OnceLock<Option<u64>> = OnceLock::new();
+    *FRAME.get_or_init(|| {
+        std::env::var("TRACE_SCROLL_FRAME")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+    })
+}
 
 // Force APU port0/1 to fixed values (HLE debug: APU_PORT0_VAL/APU_PORT1_VAL)
 pub fn apu_force_port0() -> Option<u8> {

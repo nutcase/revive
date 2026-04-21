@@ -3,6 +3,10 @@ name = "megadrive-core"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+runtime-debug-flags = []
+
 [lib]
 name = "megadrive_core"
 path = "src/lib.rs"

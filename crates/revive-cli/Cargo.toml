@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 default-run = "revive"
 
+[features]
+default = []
+snes-runtime-debug-flags = ["revive-core/snes-runtime-debug-flags"]
+megadrive-runtime-debug-flags = ["revive-core/megadrive-runtime-debug-flags"]
+gba-runtime-debug-trace = ["revive-core/gba-runtime-debug-trace"]
+
 [dependencies]
 revive-core = { path = "../revive-core" }
 revive-cheat = { path = "../revive-cheat" }
