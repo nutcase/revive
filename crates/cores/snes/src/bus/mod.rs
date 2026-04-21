@@ -149,6 +149,66 @@ mod tests {
         assert_eq!(gsu.debug_reg(13), 0xB3DE);
         assert_eq!(gsu.debug_reg(14), 0x6242);
     }
+
+    #[test]
+    fn hdmaen_rising_edge_enables_configured_channel_without_reinitialising_table() {
+        let mut bus = Bus::new(vec![]);
+        let ch = &mut bus.dma_controller.channels[1];
+        ch.configured = true;
+        ch.control = 0x40;
+        ch.hdma_enabled = false;
+        ch.hdma_terminated = false;
+        ch.hdma_indirect = false;
+        ch.hdma_table_addr = 0x12_3456;
+        ch.hdma_line_counter = 0x23;
+        ch.hdma_do_transfer = false;
+        bus.dma_controller.hdma_enable = 0x00;
+
+        bus.write_u8(0x420C, 0x02);
+
+        let ch = &bus.dma_controller.channels[1];
+        assert_eq!(bus.dma_controller.hdma_enable, 0x02);
+        assert!(ch.hdma_enabled);
+        assert!(!ch.hdma_terminated);
+        assert!(ch.hdma_indirect);
+        assert_eq!(ch.hdma_table_addr, 0x12_3456);
+        assert_eq!(ch.hdma_line_counter, 0x23);
+        assert!(!ch.hdma_do_transfer);
+    }
+
+    #[test]
+    fn hdmaen_rising_edge_does_not_restart_channel_terminated_this_frame() {
+        let mut bus = Bus::new(vec![]);
+        let ch = &mut bus.dma_controller.channels[1];
+        ch.configured = true;
+        ch.hdma_enabled = false;
+        ch.hdma_terminated = true;
+        bus.dma_controller.hdma_enable = 0x00;
+
+        bus.write_u8(0x420C, 0x02);
+
+        let ch = &bus.dma_controller.channels[1];
+        assert!(!ch.hdma_enabled);
+        assert!(ch.hdma_terminated);
+    }
+
+    #[test]
+    fn hdma_table_line_80_is_nonrepeat_128_lines() {
+        let mut bus = Bus::new(vec![]);
+        bus.wram[0] = 0x80;
+        let ch = &mut bus.dma_controller.channels[0];
+        ch.configured = true;
+        ch.control = 0x00;
+        ch.hdma_table_addr = 0x7E_0000;
+
+        assert!(bus.load_hdma_entry(0));
+
+        let ch = &bus.dma_controller.channels[0];
+        assert_eq!(ch.hdma_line_counter, 128);
+        assert!(!ch.hdma_repeat_flag);
+        assert!(ch.hdma_do_transfer);
+        assert_eq!(ch.hdma_table_addr, 0x7E_0001);
+    }
 }
 
 fn auto_press_a_frame() -> Option<u32> {
@@ -5085,6 +5145,7 @@ impl Bus {
             }
             0x420C => {
                 // HDMAEN - H-blank DMA Enable
+                let old_hdma_enable = self.dma_controller.hdma_enable;
                 if std::env::var("TRACE_HDMA_ENABLE").is_ok() {
                     let frame = self.ppu.get_frame();
                     eprintln!(
@@ -5093,6 +5154,10 @@ impl Bus {
                     );
                 }
                 self.dma_controller.write(addr, value);
+                let newly_enabled = value & !old_hdma_enable;
+                if newly_enabled != 0 {
+                    self.enable_hdma_channels_now(newly_enabled);
+                }
                 if value != 0 {
                     self.hdmaen_nonzero_count = self.hdmaen_nonzero_count.saturating_add(1);
                 }
@@ -5936,6 +6001,24 @@ impl Bus {
         }
     }
 
+    fn enable_hdma_channels_now(&mut self, mask: u8) {
+        for i in 0..8usize {
+            if (mask & (1 << i)) == 0 {
+                continue;
+            }
+            let ch = &mut self.dma_controller.channels[i];
+            if !ch.configured || ch.hdma_terminated {
+                continue;
+            }
+            // $420C rising edges are live, but they must not reinitialize the HDMA
+            // table pointer or line counter. Full table initialization happens at
+            // frame start; this only resumes an already configured channel.
+            ch.hdma_enabled = true;
+            ch.hdma_terminated = false;
+            ch.hdma_indirect = (ch.control & 0x40) != 0;
+        }
+    }
+
     // Called when the PPU scanline counter wraps to 0 (start of a new frame).
     //
     // Hardware behavior: HDMA channels are re-initialized every frame. The table start
@@ -5949,6 +6032,10 @@ impl Bus {
                 self.ppu.get_frame(),
                 mask
             );
+        }
+        for ch in &mut self.dma_controller.channels {
+            ch.hdma_enabled = false;
+            ch.hdma_terminated = false;
         }
         for i in 0..8usize {
             if (mask & (1 << i)) == 0 {
@@ -6035,6 +6122,7 @@ impl Bus {
                 .hdma_line_counter
                 .saturating_sub(1);
             self.dma_controller.channels[i].hdma_line_counter = new_count;
+            Self::mirror_hdma_nltr(&mut self.dma_controller.channels[i]);
             if new_count == 0 {
                 // Next scanline will load a new entry (which re-enables do_transfer as appropriate).
                 self.dma_controller.channels[i].hdma_do_transfer = false;
@@ -6062,7 +6150,7 @@ impl Bus {
             return false;
         }
 
-        let repeat_flag = (line_info & 0x80) != 0;
+        let repeat_flag = line_info != 0x80 && (line_info & 0x80) != 0;
         // HDMA line-count semantics per SNESdev:
         // - $00: terminate for the rest of the frame
         // - $01..$80: non-repeat, wait N scanlines
@@ -6085,8 +6173,10 @@ impl Bus {
             ch.hdma_indirect = indirect;
             ch.hdma_latched = [0; 4];
             ch.hdma_latched_len = 0;
+            ch.nltr = line_info;
             // Advance table pointer past the line counter byte.
             ch.hdma_table_addr = Bus::add16_in_bank(table_addr, 1);
+            ch.a2a = (ch.hdma_table_addr & 0xFFFF) as u16;
         }
 
         if indirect {
@@ -6095,9 +6185,11 @@ impl Bus {
             let hi = self.read_u8(Bus::add16_in_bank(ptr, 1)) as u32;
             let bank = self.dma_controller.channels[channel].dasb as u32;
             let ch = &mut self.dma_controller.channels[channel];
+            ch.size = ((hi << 8) | lo) as u16;
             ch.hdma_indirect_addr = (bank << 16) | (hi << 8) | lo;
             // Advance table pointer past the 16-bit indirect address.
             ch.hdma_table_addr = Bus::add16_in_bank(ch.hdma_table_addr, 2);
+            ch.a2a = (ch.hdma_table_addr & 0xFFFF) as u16;
         }
 
         if crate::debug_flags::trace_hdma_all() {
@@ -6240,11 +6332,25 @@ impl Bus {
             let ch = &mut self.dma_controller.channels[channel];
             if indirect {
                 ch.hdma_indirect_addr = Bus::add16_in_bank(ch.hdma_indirect_addr, len as u32);
+                ch.size = (ch.hdma_indirect_addr & 0xFFFF) as u16;
             } else {
                 ch.hdma_table_addr = Bus::add16_in_bank(ch.hdma_table_addr, len as u32);
+                ch.a2a = (ch.hdma_table_addr & 0xFFFF) as u16;
             }
         }
         self.ppu.end_hdma_context();
+    }
+
+    fn mirror_hdma_nltr(ch: &mut crate::dma::DmaChannel) {
+        ch.nltr = if ch.hdma_line_counter == 128 {
+            if ch.hdma_repeat_flag {
+                0x00
+            } else {
+                0x80
+            }
+        } else {
+            (ch.hdma_line_counter & 0x7F) | if ch.hdma_repeat_flag { 0x80 } else { 0x00 }
+        };
     }
 
     #[inline]

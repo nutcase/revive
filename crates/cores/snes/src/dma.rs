@@ -87,6 +87,29 @@ impl DmaChannel {
         self.control & 0x80 != 0
     }
 
+    fn sync_indirect_addr_from_regs(&mut self) {
+        self.hdma_indirect_addr = ((self.dasb as u32) << 16) | self.size as u32;
+    }
+
+    fn decode_nltr(value: u8) -> (u8, bool) {
+        let mut line_count = value & 0x7F;
+        if line_count == 0 {
+            line_count = 128;
+        }
+        let repeat = value == 0x00 || (value != 0x80 && (value & 0x80) != 0);
+        (line_count, repeat)
+    }
+
+    fn write_nltr(&mut self, value: u8) {
+        self.nltr = value;
+        let (line_count, repeat_flag) = Self::decode_nltr(value);
+        self.hdma_line_counter = line_count;
+        self.hdma_repeat_flag = repeat_flag;
+        if !self.hdma_enabled {
+            self.hdma_do_transfer = false;
+        }
+    }
+
     // DMA転送単位を取得
     pub fn get_transfer_unit(&self) -> u8 {
         self.control & 0x07
@@ -245,14 +268,13 @@ impl DmaController {
                 }
                 // HDMAEN records which channels participate in HDMA.
                 // Actual table initialisation happens once per frame in
-                // on_frame_start (scanline 0).  We must NOT re-init the
-                // table pointer here — doing so resets mid-frame HDMA
+                // Bus::on_frame_start (scanline 0).  We must NOT re-init the
+                // table pointer here because doing so resets mid-frame HDMA
                 // state and corrupts per-scanline data (e.g. Mode 7
                 // perspective in Pilotwings).
                 //
-                // Channels newly disabled are stopped immediately.
-                // Channels newly enabled will be picked up by the next
-                // on_frame_start.
+                // Channels newly disabled are stopped immediately. Bus wraps this
+                // write to handle live rising edges without resetting table state.
                 let disabled = old & !value;
                 for i in 0..8u8 {
                     if disabled & (1 << i) != 0 {
@@ -369,6 +391,7 @@ impl DmaController {
                         0x05 => {
                             self.channels[channel].size =
                                 (self.channels[channel].size & 0xFF00) | value as u16;
+                            self.channels[channel].sync_indirect_addr_from_regs();
                             self.channels[channel].configured = true;
                             self.channels[channel].cfg_size = true;
                             if (debug_flags::dma_reg() || debug_flags::cgram_dma())
@@ -386,6 +409,7 @@ impl DmaController {
                         0x06 => {
                             self.channels[channel].size =
                                 (self.channels[channel].size & 0x00FF) | ((value as u16) << 8);
+                            self.channels[channel].sync_indirect_addr_from_regs();
                             self.channels[channel].configured = true;
                             self.channels[channel].cfg_size = true;
                             if (debug_flags::dma_reg() || debug_flags::cgram_dma())
@@ -412,6 +436,7 @@ impl DmaController {
                         0x07 => {
                             // DASBn ($43x7): Indirect HDMA bank. RW8.
                             self.channels[channel].dasb = value;
+                            self.channels[channel].sync_indirect_addr_from_regs();
                         }
                         0x08 => {
                             // A2AnL ($43x8): HDMA table current address low. RW8.
@@ -433,7 +458,7 @@ impl DmaController {
                         }
                         0x0A => {
                             // NLTRn ($43xA): HDMA reload flag + line counter. RW8.
-                            self.channels[channel].nltr = value;
+                            self.channels[channel].write_nltr(value);
                         }
                         0x0B | 0x0F => {
                             // UNUSEDn ($43xB/$43xF): shared RW8 byte with no effect on DMA/HDMA.
@@ -532,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    fn hdmaen_midframe_enable_only_updates_mask_until_next_frame_start() {
+    fn hdmaen_midframe_enable_updates_mask_without_reinitialising_state() {
         let mut dma = DmaController::new();
         configure_hdma_channel(&mut dma, 0, 0x7E_2000);
         dma.hdma_enable = 0x00;
@@ -548,10 +573,31 @@ mod tests {
         );
         assert_eq!(
             ch.hdma_table_addr, 0x7E_2020,
-            "table pointer must be preserved until frame start"
+            "table pointer must be preserved by the controller write"
         );
         assert_eq!(ch.hdma_line_counter, 0x12);
         assert_eq!(ch.a2a, 0x3456);
         assert_eq!(ch.nltr, 0x9A);
+    }
+
+    #[test]
+    fn hdma_state_register_writes_update_internal_transfer_state() {
+        let mut dma = DmaController::new();
+
+        dma.write(0x4317, 0x12);
+        dma.write(0x4315, 0x34);
+        dma.write(0x4316, 0x56);
+        assert_eq!(dma.channels[1].hdma_indirect_addr, 0x12_5634);
+
+        dma.channels[1].hdma_enabled = false;
+        dma.channels[1].hdma_do_transfer = true;
+        dma.write(0x431A, 0x81);
+        assert_eq!(dma.channels[1].hdma_line_counter, 1);
+        assert!(dma.channels[1].hdma_repeat_flag);
+        assert!(!dma.channels[1].hdma_do_transfer);
+
+        dma.write(0x431A, 0x80);
+        assert_eq!(dma.channels[1].hdma_line_counter, 128);
+        assert!(!dma.channels[1].hdma_repeat_flag);
     }
 }
