@@ -49,6 +49,19 @@ impl CpuBus for Bus {
             0x0000..=0x1FFF => self.memory.read(addr),
             0x2000..=0x3FFF => {
                 let mirrored = 0x2000 + (addr & 0x07);
+                // $2002 (PPUSTATUS) is latency-sensitive: the vblank flag
+                // is set for only a narrow PPU-cycle window around scanline
+                // 241 cycle 1, and on real hardware the actual read happens
+                // on the last cycle of its CPU instruction (LDA/BIT abs is
+                // 4 cycles, with the read on cycle 4). Our CPU model is
+                // atomic per instruction, so pre-advance 3 CPU cycles of
+                // PPU/APU timing before returning the status. Any LDA/BIT
+                // targeting $2002 is >= 4 cycles, so we never overshoot.
+                if mirrored == 0x2002 {
+                    self.prepay_cpu_cycle();
+                    self.prepay_cpu_cycle();
+                    self.prepay_cpu_cycle();
+                }
                 self.ppu.read_register(mirrored, self.cartridge.as_ref())
             }
             0x4000..=0x4013 | 0x4015 => self.apu.read_register(addr),

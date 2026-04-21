@@ -23,6 +23,10 @@ pub struct Bus {
     dma_cycles: u32,       // Cycles to add due to DMA operations
     dma_in_progress: bool, // Flag to indicate DMA is in progress
     dmc_stall_cycles: u32,
+    // CPU cycles already ticked (PPU + APU + mapper IRQ) from inside a bus
+    // access, so Nes::step does not double-advance them.
+    prepaid_cpu_cycles: u32,
+    prepaid_nmi: bool,
 }
 
 impl Default for Bus {
@@ -45,7 +49,29 @@ impl Bus {
             dma_cycles: 0,
             dma_in_progress: false,
             dmc_stall_cycles: 0,
+            prepaid_cpu_cycles: 0,
+            prepaid_nmi: false,
         }
+    }
+
+    /// Advance one CPU cycle worth of timing (PPU + mapper + APU) and
+    /// remember that it has been paid for, so [`Nes::step`] can subtract
+    /// it from the post-instruction advance. Used by bus reads that need
+    /// the PPU state to reflect "mid-instruction" timing, notably $2002.
+    #[inline]
+    pub(crate) fn prepay_cpu_cycle(&mut self) {
+        if self.step_cpu_cycle() {
+            self.prepaid_nmi = true;
+        }
+        self.prepaid_cpu_cycles += 1;
+    }
+
+    pub(crate) fn take_prepaid_cpu_cycles(&mut self) -> u32 {
+        std::mem::take(&mut self.prepaid_cpu_cycles)
+    }
+
+    pub(crate) fn take_prepaid_nmi(&mut self) -> bool {
+        std::mem::take(&mut self.prepaid_nmi)
     }
 
     pub fn load_cartridge(&mut self, cartridge: Cartridge) {

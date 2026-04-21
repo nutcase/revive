@@ -101,7 +101,15 @@ impl Nes {
             cycles as u32
         };
 
-        let nmi_triggered = self.run_cpu_time(cpu_cycles);
+        // The CPU consumed some cycles already (e.g. a $2002 read that needs
+        // to see PPU state mid-instruction ticks one CPU cycle before the
+        // read). Subtract those from the cycles left to advance.
+        let prepaid = self.bus.take_prepaid_cpu_cycles();
+        let mut nmi_triggered = self.bus.take_prepaid_nmi();
+        let remaining = cpu_cycles.saturating_sub(prepaid);
+        if self.run_cpu_time(remaining) {
+            nmi_triggered = true;
+        }
 
         if nmi_triggered {
             let nmi_cycles = self.cpu.nmi(&mut self.bus) as u32;
