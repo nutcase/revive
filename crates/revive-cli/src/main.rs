@@ -150,7 +150,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             region.id, region.label, region.len
         );
     }
-    println!("State keys  : Cmd+1..9 load, Cmd+Shift+1..9 save");
+    println!("State keys  : {}", state_key_help());
     println!("Controls    : arrows move, Enter start, Shift/Backspace select");
     println!("Cheat panel : Tab toggle");
 
@@ -756,11 +756,31 @@ fn state_key_binding(key: Keycode, scancode: Option<Scancode>, keymod: Mod) -> O
 }
 
 fn state_command_modifier(keymod: Mod) -> bool {
+    state_primary_modifier(keymod)
+}
+
+#[cfg(target_os = "macos")]
+fn state_primary_modifier(keymod: Mod) -> bool {
     keymod.intersects(Mod::LGUIMOD | Mod::RGUIMOD)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn state_primary_modifier(keymod: Mod) -> bool {
+    keymod.intersects(Mod::LCTRLMOD | Mod::RCTRLMOD)
 }
 
 fn state_save_modifier(keymod: Mod) -> bool {
     keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD)
+}
+
+#[cfg(target_os = "macos")]
+fn state_key_help() -> &'static str {
+    "Cmd+1..9 load, Cmd+Shift+1..9 save"
+}
+
+#[cfg(not(target_os = "macos"))]
+fn state_key_help() -> &'static str {
+    "Ctrl+1..9 load, Ctrl+Shift+1..9 save"
 }
 
 fn sync_keyboard_input(

@@ -130,8 +130,10 @@ Common controls:
 
 - `Esc`: quit
 - `Tab`: show or hide the cheat panel
-- `Cmd + 1..9`: load state slots 1..9
-- `Cmd + Shift + 1..9`: save state slots 1..9
+- macOS: `Cmd + 1..9` loads state slots 1..9
+- macOS: `Cmd + Shift + 1..9` saves state slots 1..9
+- Windows/Linux: `Ctrl + 1..9` loads state slots 1..9
+- Windows/Linux: `Ctrl + Shift + 1..9` saves state slots 1..9
 
 NES:
 
