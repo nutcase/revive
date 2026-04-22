@@ -58,6 +58,25 @@ fn load_hucard_falls_back_when_high_banks_empty() {
 }
 
 #[test]
+fn load_large_hucard_enables_512k_window_mapper() {
+    let mut rom = vec![0xFF; PAGE_SIZE * 320];
+    for page in 0..320usize {
+        let offset = page * PAGE_SIZE;
+        rom[offset] = (page & 0xFF) as u8;
+        rom[offset + 1] = (page >> 8) as u8;
+    }
+    let mut emu = Emulator::new();
+    emu.load_hucard(&rom).unwrap();
+
+    emu.bus.set_mpr(4, 0x40);
+    assert_eq!((emu.bus.read(0x8001), emu.bus.read(0x8000)), (0x00, 0x40));
+
+    emu.bus.set_mpr(0, 0x00);
+    emu.bus.write(0x1FF2, 0x00);
+    assert_eq!((emu.bus.read(0x8001), emu.bus.read(0x8000)), (0x00, 0xC0));
+}
+
+#[test]
 fn load_hucard_with_magic_griffin_header_sets_cart_ram() {
     let rom_pages = 4u16;
     let mut image = vec![0u8; HUCARD_HEADER_SIZE + (rom_pages as usize * PAGE_SIZE)];

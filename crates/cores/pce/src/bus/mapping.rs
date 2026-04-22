@@ -29,7 +29,7 @@ impl Bus {
                         base: cart_page * PAGE_SIZE,
                     }
                 } else if rom_pages > 0 {
-                    let rom_page = Self::mirror_rom_bank(logical, rom_pages);
+                    let rom_page = self.mapped_rom_bank(logical, rom_pages);
                     BankMapping::Rom {
                         base: rom_page * PAGE_SIZE,
                     }
@@ -52,6 +52,36 @@ impl Bus {
 
     pub(super) fn rom_pages(&self) -> usize {
         self.rom.len() / PAGE_SIZE
+    }
+
+    pub(super) fn mapped_rom_bank(&self, logical: usize, rom_pages: usize) -> usize {
+        if self.large_hucard_mapper {
+            self.large_hucard_rom_bank(logical, rom_pages)
+        } else {
+            Self::mirror_rom_bank(logical, rom_pages)
+        }
+    }
+
+    fn large_hucard_rom_bank(&self, logical: usize, rom_pages: usize) -> usize {
+        if rom_pages == 0 {
+            return 0;
+        }
+
+        let bank = logical & 0x7F;
+        if bank < super::LARGE_HUCARD_MAPPER_WINDOW_PAGES {
+            return bank % rom_pages;
+        }
+
+        let selectable_pages = rom_pages.saturating_sub(super::LARGE_HUCARD_MAPPER_WINDOW_PAGES);
+        if selectable_pages == 0 {
+            return bank % rom_pages;
+        }
+
+        let window_page = bank & (super::LARGE_HUCARD_MAPPER_WINDOW_PAGES - 1);
+        let latch = (self.large_hucard_latch & self.large_hucard_bank_mask) as usize;
+        let selected_page =
+            (latch * super::LARGE_HUCARD_MAPPER_WINDOW_PAGES + window_page) % selectable_pages;
+        super::LARGE_HUCARD_MAPPER_WINDOW_PAGES + selected_page
     }
 
     /// Map a logical ROM bank number to a physical ROM page, handling
@@ -105,5 +135,25 @@ impl Bus {
         if let Some(slot) = self.bram.get_mut(offset) {
             *slot = value;
         }
+    }
+
+    pub(super) fn write_large_hucard_mapper_latch(&mut self, addr: u16) -> bool {
+        if !self.large_hucard_mapper {
+            return false;
+        }
+
+        let bank_index = (addr as usize) >> 13;
+        let logical_bank = self.mpr[bank_index] & 0x7F;
+        if logical_bank != 0 {
+            return false;
+        }
+
+        if (addr & 0x1FF0) != 0x1FF0 {
+            return false;
+        }
+
+        self.large_hucard_latch = (addr & 0x000F) as u8;
+        self.rebuild_mpr_mappings();
+        true
     }
 }

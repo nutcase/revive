@@ -7,7 +7,7 @@ mod tests;
 use crate::bus::{Bus, CompatBusStateV1, IRQ_REQUEST_TIMER};
 use crate::cpu::Cpu;
 use crate::debugger::{DebugBreak, DebugTick, Debugger};
-use hucard::{ParsedHuCard, RESET_VECTOR_LEGACY, RESET_VECTOR_PRIMARY};
+use hucard::{ParsedHuCard, RESET_VECTOR_LEGACY, RESET_VECTOR_PRIMARY, large_hucard_mapper_size};
 use std::error::Error;
 
 #[derive(Clone, bincode::Encode, bincode::Decode)]
@@ -56,7 +56,7 @@ impl Emulator {
     /// mapping the upper MPR banks so the reset vector points into ROM.
     pub fn load_hucard(&mut self, image: &[u8]) -> Result<(), Box<dyn Error>> {
         let parsed = ParsedHuCard::from_bytes(image)?;
-        let ParsedHuCard { rom, header } = parsed;
+        let ParsedHuCard { mut rom, header } = parsed;
         self.bus = Bus::new();
         self.audio_buffer.clear();
         let backup_bytes = header
@@ -67,7 +67,14 @@ impl Emulator {
             header.is_none() || backup_bytes == header.as_ref().unwrap().backup_ram_bytes()
         );
         self.bus.configure_cart_ram(backup_bytes);
+        let large_hucard_mapper = large_hucard_mapper_size(&rom);
+        if let Some(mapped_size) = large_hucard_mapper {
+            rom.resize(mapped_size, 0xFF);
+        }
         self.bus.load_rom_image(rom);
+        if large_hucard_mapper.is_some() {
+            self.bus.enable_large_hucard_mapper();
+        }
 
         let pages = self.bus.rom_page_count();
         if pages == 0 {

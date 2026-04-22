@@ -7,6 +7,11 @@ pub(super) const HUCARD_TYPE_PCE: u8 = 0x02;
 pub(super) const RESET_VECTOR_PRIMARY: u16 = 0xFFFE;
 pub(super) const RESET_VECTOR_LEGACY: u16 = 0xFFFC;
 pub(super) const NUM_HUCARD_WINDOW_BANKS: usize = 4;
+const LARGE_HUCARD_MAPPER_THRESHOLD: usize = 2 * 1024 * 1024;
+const LARGE_HUCARD_FIXED_WINDOW: usize = 512 * 1024;
+const LARGE_HUCARD_SELECT_WINDOW: usize = 512 * 1024;
+const LARGE_HUCARD_MIN_MAPPED_SIZE: usize =
+    LARGE_HUCARD_FIXED_WINDOW + (4 * LARGE_HUCARD_SELECT_WINDOW);
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HucardHeader {
@@ -137,6 +142,23 @@ pub(super) fn read_reset_vector(bus: &mut Bus) -> u16 {
     }
 }
 
+pub(super) fn large_hucard_mapper_size(rom: &[u8]) -> Option<usize> {
+    if rom.len() < LARGE_HUCARD_MAPPER_THRESHOLD || has_mcgenjin_marker(rom) {
+        return None;
+    }
+
+    if rom.len() < LARGE_HUCARD_SELECT_WINDOW * 6 {
+        Some(LARGE_HUCARD_MIN_MAPPED_SIZE)
+    } else {
+        let selectable = rom.len().saturating_sub(LARGE_HUCARD_FIXED_WINDOW);
+        Some(selectable.next_power_of_two() + LARGE_HUCARD_FIXED_WINDOW)
+    }
+}
+
+fn has_mcgenjin_marker(rom: &[u8]) -> bool {
+    rom.get(0x1FD0..0x1FD8) == Some(&b"MCGENJIN"[..])
+}
+
 use super::Emulator;
 
 impl Emulator {
@@ -163,8 +185,9 @@ impl Emulator {
             return;
         }
 
+        let addressable_pages = pages.min(0x80);
         let mut reset_bank = None;
-        for bank in 0..pages {
+        for bank in 0..addressable_pages {
             self.bus.map_bank_to_rom(7, bank);
             let vector = read_reset_vector(&mut self.bus);
             if is_valid_reset_vector(vector) {
@@ -173,10 +196,11 @@ impl Emulator {
             }
         }
 
-        let reset_bank = reset_bank.unwrap_or_else(|| pages.saturating_sub(1));
-        let base = (reset_bank + pages + 1 - NUM_HUCARD_WINDOW_BANKS) % pages;
+        let reset_bank = reset_bank.unwrap_or_else(|| addressable_pages.saturating_sub(1));
+        let base =
+            (reset_bank + addressable_pages + 1 - NUM_HUCARD_WINDOW_BANKS) % addressable_pages;
         for slot in 0..NUM_HUCARD_WINDOW_BANKS {
-            let rom_bank = (base + slot) % pages;
+            let rom_bank = (base + slot) % addressable_pages;
             let mpr_slot = 4 + slot;
             self.bus.map_bank_to_rom(mpr_slot, rom_bank);
         }

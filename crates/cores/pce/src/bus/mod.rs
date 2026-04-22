@@ -1,9 +1,9 @@
 use crate::psg::Psg;
 use crate::vce::Vce;
 use crate::vdc::{
-    Vdc, DMA_CTRL_DST_DEC, DMA_CTRL_SRC_DEC, FRAME_HEIGHT, FRAME_WIDTH, VDC_CTRL_ENABLE_BACKGROUND,
+    DMA_CTRL_DST_DEC, DMA_CTRL_SRC_DEC, FRAME_HEIGHT, FRAME_WIDTH, VDC_CTRL_ENABLE_BACKGROUND,
     VDC_CTRL_ENABLE_BACKGROUND_LEGACY, VDC_CTRL_ENABLE_SPRITES, VDC_CTRL_ENABLE_SPRITES_LEGACY,
-    VDC_DMA_WORD_CYCLES, VDC_VBLANK_INTERVAL,
+    VDC_DMA_WORD_CYCLES, VDC_VBLANK_INTERVAL, Vdc,
 };
 
 // Re-export VDC status constants for external consumers (examples, etc.)
@@ -38,6 +38,8 @@ const MASTER_CLOCK_HZ: u32 = 7_159_090;
 const PSG_CLOCK_HZ: u32 = MASTER_CLOCK_HZ / 2;
 const AUDIO_SAMPLE_RATE: u32 = 44_100;
 const DEFAULT_DISPLAY_HEIGHT: usize = 224;
+const LARGE_HUCARD_MAPPER_THRESHOLD_PAGES: usize = 0x100; // 2 MiB / 8 KiB
+const LARGE_HUCARD_MAPPER_WINDOW_PAGES: usize = 0x40; // 512 KiB / 8 KiB
 
 mod env;
 mod font;
@@ -72,6 +74,9 @@ pub struct AudioDiagnostics {
 pub struct Bus {
     ram: Vec<u8>,
     rom: Vec<u8>,
+    large_hucard_mapper: bool,
+    large_hucard_latch: u8,
+    large_hucard_bank_mask: u8,
     banks: [BankMapping; NUM_BANKS],
     mpr: [u8; NUM_BANKS],
     st_ports: [u8; 3],
@@ -174,6 +179,9 @@ impl Bus {
         let mut bus = Self {
             ram: vec![0; RAM_SIZE],
             rom: Vec::new(),
+            large_hucard_mapper: false,
+            large_hucard_latch: 0,
+            large_hucard_bank_mask: 0,
             banks: [BankMapping::Ram { base: 0 }; NUM_BANKS],
             mpr: [0; NUM_BANKS],
             st_ports: [0; 3],
@@ -319,7 +327,7 @@ impl Bus {
                 {
                     let rom_pages = self.rom_pages();
                     if rom_pages > 0 {
-                        let rom_page = Self::mirror_rom_bank(0xFF, rom_pages);
+                        let rom_page = self.mapped_rom_bank(0xFF, rom_pages);
                         let rom_addr = rom_page * PAGE_SIZE + io_offset;
                         return self.rom.get(rom_addr).copied().unwrap_or(0xFF);
                     }
@@ -447,7 +455,9 @@ impl Bus {
 
                 self.refresh_vdc_irq();
             }
-            BankMapping::Rom { .. } => {}
+            BankMapping::Rom { .. } => {
+                self.write_large_hucard_mapper_latch(addr);
+            }
         }
     }
 
@@ -475,6 +485,9 @@ impl Bus {
 
     pub fn clear(&mut self) {
         self.ram.fill(0);
+        self.large_hucard_mapper = false;
+        self.large_hucard_latch = 0;
+        self.large_hucard_bank_mask = 0;
         self.io.fill(0);
         self.io_port.reset();
         self.interrupt_disable = 0;
@@ -517,9 +530,31 @@ impl Bus {
     /// caller can decide which windows should point at the new image.
     pub fn load_rom_image(&mut self, data: Vec<u8>) {
         self.rom = data;
+        self.large_hucard_mapper = false;
+        self.large_hucard_latch = 0;
+        self.large_hucard_bank_mask = 0;
         for idx in 0..NUM_BANKS {
             self.update_mpr(idx);
         }
+    }
+
+    pub fn enable_large_hucard_mapper(&mut self) {
+        let selectable_windows = self
+            .rom_pages()
+            .saturating_sub(LARGE_HUCARD_MAPPER_WINDOW_PAGES)
+            / LARGE_HUCARD_MAPPER_WINDOW_PAGES;
+        if selectable_windows == 0 {
+            self.large_hucard_mapper = false;
+            self.large_hucard_latch = 0;
+            self.large_hucard_bank_mask = 0;
+            self.rebuild_mpr_mappings();
+            return;
+        }
+
+        self.large_hucard_mapper = true;
+        self.large_hucard_latch = 0;
+        self.large_hucard_bank_mask = selectable_windows.saturating_sub(1).min(0x0F) as u8;
+        self.rebuild_mpr_mappings();
     }
 
     pub fn map_bank_to_ram(&mut self, bank: usize, page: usize) {
@@ -566,6 +601,11 @@ impl Bus {
     }
 
     pub(crate) fn post_load_fixup(&mut self) {
+        if !self.large_hucard_mapper && self.rom_pages() >= LARGE_HUCARD_MAPPER_THRESHOLD_PAGES {
+            self.enable_large_hucard_mapper();
+        } else if self.large_hucard_mapper {
+            self.large_hucard_latch &= 0x0F;
+        }
         self.audio_phi_accumulator = 0;
         self.cpu_vdc_vce_penalty_cycles = TransientU64(0);
         self.cpu_high_speed_hint = TransientBool(false);
@@ -1615,6 +1655,9 @@ impl From<CompatBusStateV1> for Bus {
         Self {
             ram: value.ram,
             rom: value.rom,
+            large_hucard_mapper: false,
+            large_hucard_latch: 0,
+            large_hucard_bank_mask: 0,
             banks: value.banks,
             mpr: value.mpr,
             st_ports: value.st_ports,
