@@ -20,6 +20,8 @@ use sdl2::video::{GLProfile, SwapInterval, Window};
 const DEFAULT_SCALE: u32 = 3;
 const PANEL_WIDTH_DEFAULT: f32 = 420.0;
 const PANEL_WIDTH_MIN: f32 = 300.0;
+const HUD_TOAST_DURATION: Duration = Duration::from_millis(1400);
+const HUD_TOAST_FONT_SIZE: f32 = 20.0;
 const INPUT_BUTTONS: [VirtualButton; 15] = [
     VirtualButton::Up,
     VirtualButton::Down,
@@ -54,6 +56,49 @@ impl InputState {
 
     fn clear(&mut self) {
         self.pressed.fill(false);
+    }
+}
+
+#[derive(Debug, Default)]
+struct HudToast {
+    text: String,
+    expires_at: Option<Instant>,
+}
+
+impl HudToast {
+    fn show(&mut self, text: impl Into<String>) {
+        self.text = text.into();
+        self.expires_at = Some(Instant::now() + HUD_TOAST_DURATION);
+    }
+
+    fn is_visible(&self) -> bool {
+        self.expires_at
+            .is_some_and(|expires_at| Instant::now() < expires_at)
+    }
+
+    fn draw(&mut self, ctx: &egui::Context) {
+        if !self.is_visible() {
+            self.expires_at = None;
+            return;
+        }
+
+        egui::Area::new(egui::Id::new("state_hud_toast"))
+            .anchor(egui::Align2::LEFT_TOP, egui::vec2(12.0, 12.0))
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::default()
+                    .fill(egui::Color32::from_rgba_premultiplied(18, 18, 18, 220))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(82)))
+                    .inner_margin(egui::Margin::symmetric(12, 8))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(&self.text)
+                                .strong()
+                                .size(HUD_TOAST_FONT_SIZE)
+                                .color(egui::Color32::WHITE),
+                        );
+                    });
+            });
     }
 }
 
@@ -105,7 +150,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             region.id, region.label, region.len
         );
     }
-    println!("State keys  : Ctrl/Cmd+0..9 save, 0..9 load");
+    println!("State keys  : Cmd+1..9 load, Cmd+Shift+1..9 save");
     println!("Controls    : arrows move, Enter start, Shift/Backspace select");
     println!("Cheat panel : Tab toggle");
 
@@ -330,6 +375,7 @@ fn run_sdl_loop(
     let mut frame_clock = FrameClock::new(core.system());
     let mut input_state = InputState::default();
     let mut cheat_panel = CheatPanel::new();
+    let mut hud_toast = HudToast::default();
     let mut prev_panel_visible = cheat_panel.is_visible();
     let mut panel_width_px = PANEL_WIDTH_DEFAULT as u32;
     let input_debug = std::env::var_os("REVIVE_INPUT_DEBUG").is_some();
@@ -392,11 +438,13 @@ fn run_sdl_loop(
                 } => break 'running,
                 Event::KeyDown {
                     keycode: Some(key),
+                    scancode,
                     keymod,
                     repeat: false,
                     ..
                 } => {
                     let key = *key;
+                    let scancode = *scancode;
                     let keymod = *keymod;
                     if key == Keycode::Tab {
                         if cheat_panel.is_visible() {
@@ -407,10 +455,10 @@ fn run_sdl_loop(
                         }
                         continue;
                     }
-                    if cheat_panel.is_visible() && egui_ctx.wants_keyboard_input() {
+                    if handle_state_key(&mut core, key, scancode, keymod, &mut hud_toast) {
                         continue;
                     }
-                    if handle_state_key(&mut core, key, keymod) {
+                    if cheat_panel.is_visible() && egui_ctx.wants_keyboard_input() {
                         continue;
                     }
                     if let Some(button) = keycode_button(core.system(), key) {
@@ -428,7 +476,11 @@ fn run_sdl_loop(
                     ..
                 } => {
                     let key = *key;
-                    if cheat_panel.is_visible() {
+                    // Mirror KeyDown: only swallow the release when egui
+                    // actually owns keyboard focus (e.g. a cheat text
+                    // field is active). Dropping every KeyUp while the
+                    // panel is open left game buttons stuck down.
+                    if cheat_panel.is_visible() && egui_ctx.wants_keyboard_input() {
                         continue;
                     }
                     if let Some(button) = keycode_button(core.system(), key) {
@@ -454,7 +506,7 @@ fn run_sdl_loop(
             prev_panel_visible = cheat_panel.is_visible();
         }
 
-        if cheat_panel.is_visible() {
+        if cheat_panel.is_visible() && egui_ctx.wants_keyboard_input() {
             input_state.clear();
             release_keyboard_input(&mut core);
         } else {
@@ -501,9 +553,8 @@ fn run_sdl_loop(
         let game_vp_w = win_w.saturating_sub(panel_px);
         game_renderer.draw(0, 0, game_vp_w as i32, win_h as i32);
 
-        if cheat_panel.is_visible() {
-            let live_memory = MemorySnapshot::capture(&core);
-
+        let draw_ui = cheat_panel.is_visible() || hud_toast.is_visible();
+        if draw_ui {
             unsafe {
                 gl::Viewport(0, 0, win_w as i32, win_h as i32);
                 gl::Enable(gl::BLEND);
@@ -518,27 +569,31 @@ fn run_sdl_loop(
 
             let mut pending_writes = Vec::new();
             let full_output = egui_ctx.run(egui_state.input.take(), |ctx| {
-                let panel_resp = egui::SidePanel::right("cheat_panel")
-                    .resizable(true)
-                    .min_width(PANEL_WIDTH_MIN)
-                    .default_width(PANEL_WIDTH_DEFAULT)
-                    .show(ctx, |ui| {
-                        egui::ScrollArea::vertical()
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                pending_writes = cheat_panel.show_panel(
-                                    ui,
-                                    &live_memory,
-                                    &mut cheats,
-                                    Some(cheat_path),
-                                );
-                            });
-                    });
-                let actual_w = panel_resp.response.rect.width() as u32;
-                if actual_w != panel_width_px {
-                    panel_width_px = actual_w;
-                    let _ = window.set_size(game_w + panel_width_px, game_h);
+                if cheat_panel.is_visible() {
+                    let live_memory = MemorySnapshot::capture(&core);
+                    let panel_resp = egui::SidePanel::right("cheat_panel")
+                        .resizable(true)
+                        .min_width(PANEL_WIDTH_MIN)
+                        .default_width(PANEL_WIDTH_DEFAULT)
+                        .show(ctx, |ui| {
+                            egui::ScrollArea::vertical()
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    pending_writes = cheat_panel.show_panel(
+                                        ui,
+                                        &live_memory,
+                                        &mut cheats,
+                                        Some(cheat_path),
+                                    );
+                                });
+                        });
+                    let actual_w = panel_resp.response.rect.width() as u32;
+                    if actual_w != panel_width_px {
+                        panel_width_px = actual_w;
+                        let _ = window.set_size(game_w + panel_width_px, game_h);
+                    }
                 }
+                hud_toast.draw(ctx);
             });
 
             let prims = egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
@@ -629,45 +684,83 @@ fn apply_cheats(core: &mut CoreInstance, cheats: &CheatManager) {
     }
 }
 
-fn handle_state_key(core: &mut CoreInstance, key: Keycode, keymod: Mod) -> bool {
-    let Some(slot) = state_slot_from_key(key) else {
+fn handle_state_key(
+    core: &mut CoreInstance,
+    key: Keycode,
+    scancode: Option<Scancode>,
+    keymod: Mod,
+    hud_toast: &mut HudToast,
+) -> bool {
+    let Some((slot, save)) = state_key_binding(key, scancode, keymod) else {
         return false;
     };
-    if state_save_modifier(keymod) {
+    if save {
         match core.save_state_to_slot(slot) {
-            Ok(()) => println!("Saved state slot {slot}"),
-            Err(err) => eprintln!("failed to save state slot {slot}: {err}"),
+            Ok(()) => {
+                println!("Saved state slot {slot}");
+                hud_toast.show(format!("Saved slot {slot}"));
+            }
+            Err(err) => {
+                eprintln!("failed to save state slot {slot}: {err}");
+                hud_toast.show(format!("Save slot {slot} failed"));
+            }
         }
     } else {
         match core.load_state_from_slot(slot) {
-            Ok(()) => println!("Loaded state slot {slot}"),
-            Err(err) if err.starts_with("no saved state file found") => {
-                eprintln!("state slot {slot} is empty: {err}")
+            Ok(()) => {
+                println!("Loaded state slot {slot}");
+                hud_toast.show(format!("Loaded slot {slot}"));
             }
-            Err(err) => eprintln!("failed to load state slot {slot}: {err}"),
+            Err(err) if err.starts_with("no saved state file found") => {
+                eprintln!("state slot {slot} is empty: {err}");
+                hud_toast.show(format!("Slot {slot} empty"));
+            }
+            Err(err) => {
+                eprintln!("failed to load state slot {slot}: {err}");
+                hud_toast.show(format!("Load slot {slot} failed"));
+            }
         }
     }
     true
 }
 
-fn state_slot_from_key(key: Keycode) -> Option<u8> {
-    match key {
-        Keycode::Num0 | Keycode::Kp0 => Some(0),
-        Keycode::Num1 | Keycode::Kp1 => Some(1),
-        Keycode::Num2 | Keycode::Kp2 => Some(2),
-        Keycode::Num3 | Keycode::Kp3 => Some(3),
-        Keycode::Num4 | Keycode::Kp4 => Some(4),
-        Keycode::Num5 | Keycode::Kp5 => Some(5),
-        Keycode::Num6 | Keycode::Kp6 => Some(6),
-        Keycode::Num7 | Keycode::Kp7 => Some(7),
-        Keycode::Num8 | Keycode::Kp8 => Some(8),
-        Keycode::Num9 | Keycode::Kp9 => Some(9),
-        _ => None,
+fn state_key_binding(key: Keycode, scancode: Option<Scancode>, keymod: Mod) -> Option<(u8, bool)> {
+    if !state_command_modifier(keymod) {
+        return None;
     }
+
+    let slot = match scancode {
+        Some(Scancode::Num1 | Scancode::Kp1) => 1,
+        Some(Scancode::Num2 | Scancode::Kp2) => 2,
+        Some(Scancode::Num3 | Scancode::Kp3) => 3,
+        Some(Scancode::Num4 | Scancode::Kp4) => 4,
+        Some(Scancode::Num5 | Scancode::Kp5) => 5,
+        Some(Scancode::Num6 | Scancode::Kp6) => 6,
+        Some(Scancode::Num7 | Scancode::Kp7) => 7,
+        Some(Scancode::Num8 | Scancode::Kp8) => 8,
+        Some(Scancode::Num9 | Scancode::Kp9) => 9,
+        _ => match key {
+            Keycode::Num1 | Keycode::Kp1 => 1,
+            Keycode::Num2 | Keycode::Kp2 => 2,
+            Keycode::Num3 | Keycode::Kp3 => 3,
+            Keycode::Num4 | Keycode::Kp4 => 4,
+            Keycode::Num5 | Keycode::Kp5 => 5,
+            Keycode::Num6 | Keycode::Kp6 => 6,
+            Keycode::Num7 | Keycode::Kp7 => 7,
+            Keycode::Num8 | Keycode::Kp8 => 8,
+            Keycode::Num9 | Keycode::Kp9 => 9,
+            _ => return None,
+        },
+    };
+    Some((slot, state_save_modifier(keymod)))
+}
+
+fn state_command_modifier(keymod: Mod) -> bool {
+    keymod.intersects(Mod::LGUIMOD | Mod::RGUIMOD)
 }
 
 fn state_save_modifier(keymod: Mod) -> bool {
-    keymod.intersects(Mod::LCTRLMOD | Mod::RCTRLMOD | Mod::LGUIMOD | Mod::RGUIMOD)
+    keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD)
 }
 
 fn sync_keyboard_input(

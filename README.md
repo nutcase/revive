@@ -130,8 +130,8 @@ Common controls:
 
 - `Esc`: quit
 - `Tab`: show or hide the cheat panel
-- `Ctrl/Cmd + 0..9`: save state
-- `0..9`: load state
+- `Cmd + 1..9`: load state slots 1..9
+- `Cmd + Shift + 1..9`: save state slots 1..9
 
 NES:
 
