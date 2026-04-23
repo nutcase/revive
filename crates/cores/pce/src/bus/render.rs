@@ -446,7 +446,13 @@ impl Bus {
             use_upper_cg_pair: bool,
         }
 
-        let vram = &self.vdc.vram;
+        let vram = if self.sprite_vram_snapshot.0.len() == self.vdc.vram.len()
+            && !self.sprite_vram_snapshot.0.is_empty()
+        {
+            &self.sprite_vram_snapshot.0
+        } else {
+            &self.vdc.vram
+        };
         let vram_mask = vram.len().saturating_sub(1);
         let mut overflow_detected = false;
         let mwr = self.vdc.registers[0x09];
@@ -468,7 +474,7 @@ impl Bus {
             let line_display_start = line_display_starts[dest_row] as i32;
             let mut line_sprites = [LineSprite::default(); SPRITE_COUNT];
             let mut line_sprite_count = 0usize;
-            let mut slots_used = 0u8;
+            let mut cell_slots_used = 0u8;
             let scanline_y = active_row as i32;
 
             for sprite_idx in 0..SPRITE_COUNT.min(sprite_max_entries) {
@@ -507,14 +513,15 @@ impl Bus {
                     continue;
                 }
 
-                if !no_sprite_line_limit && slots_used >= 16 {
+                let required_cell_slots = width_cells as u8;
+                if !no_sprite_line_limit && cell_slots_used >= 16 {
                     overflow_detected = true;
                     continue;
                 }
-                // MAME: accepted sprites always render full width even when
-                // pushing the slot count past 16 (a 32px sprite at slot 15
-                // uses slots 15+16 and renders both cells fully).
-                slots_used = slots_used.saturating_add(width_cells as u8);
+                if cell_slots_used.saturating_add(required_cell_slots) > 16 {
+                    overflow_detected = true;
+                }
+                cell_slots_used = cell_slots_used.saturating_add(required_cell_slots).min(16);
 
                 let mut pattern_base_index = if pattern_raw_index {
                     (pattern_word & 0x03FF) as usize
@@ -524,14 +531,12 @@ impl Bus {
                 if width_cells == 2 {
                     pattern_base_index &= !0x0001;
                 }
-                // MAME: each height-code bit independently masks a pattern bit.
-                //   cgy bit 0 → mask pattern bit 1
-                //   cgy bit 1 → mask pattern bit 2
-                if height_code & 1 != 0 {
-                    pattern_base_index &= !0x0002;
-                }
-                if height_code & 2 != 0 {
-                    pattern_base_index &= !0x0004;
+                // HuC6270 aligns tall sprites to their required tile group.
+                // 32px high clears bit 1; 64px high clears bits 1 and 2.
+                match height_code {
+                    1 => pattern_base_index &= !0x0002,
+                    2 | 3 => pattern_base_index &= !0x0006,
+                    _ => {}
                 }
 
                 let v_flip = (attr_word & 0x8000) != 0;
@@ -561,7 +566,7 @@ impl Bus {
                 }
             }
 
-            self.sprite_line_counts[dest_row] = slots_used;
+            self.sprite_line_counts[dest_row] = cell_slots_used;
 
             let line_display_start = line_display_starts[dest_row];
             let line_display_width = line_display_widths[dest_row];

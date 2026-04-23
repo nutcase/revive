@@ -482,6 +482,54 @@ fn write_constant_sprite_tile(bus: &mut Bus, pattern_index: usize, value: u8) {
 }
 
 #[test]
+fn sprite_render_uses_frame_boundary_vram_snapshot() {
+    let mut bus = Bus::new();
+    bus.set_mpr(0, 0xFF);
+
+    set_vdc_control(&mut bus, VDC_CTRL_DISPLAY_FULL);
+    bus.vce.palette[0x101] = 0x0001;
+    bus.vce.palette[0x102] = 0x0010;
+
+    let sprite_y = 32;
+    let sprite_x = 24;
+    write_constant_sprite_tile(&mut bus, 0, 0x01);
+    bus.vdc.satb[0] = ((sprite_y + 64) & 0x03FF) as u16;
+    bus.vdc.satb[1] = ((sprite_x + 32) & 0x03FF) as u16;
+    bus.vdc.satb[2] = 0x0000;
+    bus.vdc.satb[3] = 0x0000;
+    bus.capture_sprite_vram_snapshot();
+
+    write_constant_sprite_tile(&mut bus, 0, 0x02);
+    bus.render_frame_from_vram();
+
+    let sprite_pixel = sprite_y as usize * FRAME_WIDTH + sprite_x as usize;
+    assert_eq!(bus.framebuffer[sprite_pixel], bus.vce.palette_rgb(0x101));
+}
+
+#[test]
+fn tick_captures_sprite_vram_snapshot_on_first_active_line() {
+    let mut bus = Bus::new();
+    bus.vdc.registers[0x0C] = 0x0F02;
+    bus.vdc.registers[0x0D] = 0x00EF;
+    bus.vdc.registers[0x0E] = 0x0003;
+    let active_start = bus.vdc.vertical_window().active_start_line as u16;
+
+    write_constant_sprite_tile(&mut bus, 0, 0x03);
+    bus.vdc.scanline = active_start - 1;
+    bus.vdc.in_vblank = false;
+    bus.vdc.phi_scaled = VDC_VBLANK_INTERVAL as u64;
+
+    bus.tick(1, true);
+
+    assert_eq!(bus.vdc.scanline, active_start);
+    assert_eq!(bus.sprite_vram_snapshot.0.len(), bus.vdc.vram.len());
+    assert_eq!(
+        &bus.sprite_vram_snapshot.0[..SPRITE_PATTERN_WORDS],
+        &bus.vdc.vram[..SPRITE_PATTERN_WORDS]
+    );
+}
+
+#[test]
 fn sprites_render_when_background_disabled() {
     let mut bus = Bus::new();
     bus.set_mpr(0, 0xFF);
@@ -670,6 +718,36 @@ fn sprite_quad_height_plots_bottom_row() {
 }
 
 #[test]
+fn sprite_quad_height_masks_pattern_bits_one_and_two() {
+    let mut bus = Bus::new();
+    bus.set_mpr(0, 0xFF);
+
+    set_vdc_control(&mut bus, VDC_CTRL_DISPLAY_FULL);
+
+    const MASKED_TILE: usize = 0x320;
+    const UNMASKED_BY_OLD_CODE_TILE: usize = 0x322;
+    const SAT_TILE: usize = 0x326;
+
+    write_constant_sprite_tile(&mut bus, MASKED_TILE, 0x01);
+    write_constant_sprite_tile(&mut bus, UNMASKED_BY_OLD_CODE_TILE, 0x02);
+    bus.vce.palette[0x101] = 0x0001;
+    bus.vce.palette[0x102] = 0x0010;
+
+    let x_pos = 24;
+    let y_pos = 40;
+    let satb_index = 0;
+    bus.vdc.satb[satb_index] = ((y_pos + 64) & 0x03FF) as u16;
+    bus.vdc.satb[satb_index + 1] = ((x_pos + 32) & 0x03FF) as u16;
+    bus.vdc.satb[satb_index + 2] = (SAT_TILE as u16) << 1;
+    bus.vdc.satb[satb_index + 3] = 0x2000 | 0x0080;
+
+    bus.render_frame_from_vram();
+
+    let top_left_pixel = y_pos * FRAME_WIDTH + x_pos;
+    assert_eq!(bus.framebuffer[top_left_pixel], bus.vce.palette_rgb(0x101));
+}
+
+#[test]
 fn scroll_registers_latch_on_scanline_boundary() {
     let mut vdc = Vdc::new();
     let (x0, y0) = vdc.scroll_for_scanline();
@@ -715,6 +793,35 @@ fn scroll_writes_apply_on_next_visible_scanline() {
 
     let (x_now, _) = vdc.scroll_for_scanline();
     assert_eq!(x_now, 0x1234 & 0x03FF);
+}
+
+#[test]
+fn rcr_isr_scroll_writes_apply_on_following_scanline() {
+    let mut vdc = Vdc::new();
+    vdc.in_vblank = false;
+    vdc.scroll_x = 4;
+    vdc.scroll_y = 0;
+    vdc.registers[0x04] = 0x008C;
+    vdc.registers[0x05] = 0x008C;
+    vdc.render_control_latch = 0x008C;
+
+    vdc.latch_line_state(10);
+
+    vdc.scroll_x_pending = 51;
+    vdc.scroll_x_dirty = true;
+    vdc.scroll_y_pending = 77;
+    vdc.scroll_y_dirty = true;
+    vdc.registers[0x04] = 0x00CC;
+    vdc.registers[0x05] = 0x00CC;
+    vdc.render_control_latch = 0x00CC;
+    vdc.consume_post_isr_scroll(10);
+
+    assert_eq!(vdc.scroll_values_for_line(10), (4, 0, 0));
+    assert_eq!(vdc.control_values_for_line(10), 0x008C);
+
+    vdc.latch_line_state(11);
+    assert_eq!(vdc.scroll_values_for_line(11), (51, 77, 0));
+    assert_eq!(vdc.control_values_for_line(11), 0x00CC);
 }
 
 #[test]

@@ -640,10 +640,10 @@ impl Vdc {
         }
     }
 
-    /// Re-latch scroll/zoom/control for a scanline whose RCR ISR has now
-    /// completed.  Called once per RCR event, just before the scanline
-    /// advances.  Updates bg_y_offset to account for the ISR's BYR write.
-    pub(crate) fn consume_post_isr_scroll(&mut self, line: usize) {
+    /// Consume scroll/zoom writes made by an RCR ISR.  Called once per RCR
+    /// event, just before the scanline advances.  The current scanline keeps
+    /// its already-latched state; the writes are applied to the next latch.
+    pub(crate) fn consume_post_isr_scroll(&mut self, _line: usize) {
         // After the CPU services an RCR ISR, consume any pending scroll/zoom
         // writes so bg_y_offset is updated.  On real hardware the VDC has
         // already started rendering the RCR scanline with the *pre-ISR*
@@ -664,22 +664,11 @@ impl Vdc {
         self.apply_pending_scroll();
         self.apply_pending_zoom();
 
-        // Relatch BXR (horizontal scroll) and the control register for
-        // the RCR scanline.  The RCR fires during h-sync, before the
-        // active display portion of the scanline begins.  Unlike BYR
-        // (which uses a latch-and-relatch mechanism taking effect on the
-        // *next* scanline), BXR is read directly from the register
-        // during pixel output, so the ISR's BXR write takes effect
-        // immediately on the current scanline.  CR similarly takes
-        // effect immediately.
-        //
-        // We do NOT update scroll_line_y or scroll_line_y_offset here
-        // because BYR uses m_byr_latched semantics: the relatch occurs
-        // at the next h-sync, so BYR changes affect the next scanline.
-        if line < self.scroll_line_x.len() {
-            self.scroll_line_x[line] = self.scroll_x;
-            self.control_line[line] = self.control_for_render();
-        }
+        // Do not re-latch the current scanline after an RCR ISR.  BXR,
+        // BYR, and CR are sampled into the per-line state before the RCR
+        // handler runs; writes made by the handler affect the following
+        // scanline.  Re-latching only BXR/CR here mixes old Y with new X,
+        // which shifts split-screen separator rows horizontally.
     }
 
     pub(crate) fn tick(&mut self, phi_cycles: u32) -> bool {

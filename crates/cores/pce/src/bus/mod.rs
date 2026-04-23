@@ -51,7 +51,7 @@ mod types;
 use self::types::TransientU64;
 use self::types::{
     BankMapping, ControlRegister, IoPort, PaletteFlickerEvent, Timer, TransientBool, TransientBram,
-    TransientPaletteFlicker, TransientUsize, VdcPort,
+    TransientPaletteFlicker, TransientSpriteVramSnapshot, TransientUsize, VdcPort,
 };
 use font::FONT;
 
@@ -98,6 +98,7 @@ pub struct Bus {
     cpu_vdc_vce_penalty_cycles: TransientU64,
     cpu_high_speed_hint: TransientBool,
     vce_palette_flicker: TransientPaletteFlicker,
+    sprite_vram_snapshot: TransientSpriteVramSnapshot,
     framebuffer: Vec<u32>,
     frame_ready: bool,
     cart_ram: Vec<u8>,
@@ -203,6 +204,7 @@ impl Bus {
             cpu_vdc_vce_penalty_cycles: TransientU64(0),
             cpu_high_speed_hint: TransientBool(false),
             vce_palette_flicker: TransientPaletteFlicker::default(),
+            sprite_vram_snapshot: TransientSpriteVramSnapshot::default(),
             framebuffer: vec![0; FRAME_WIDTH * FRAME_HEIGHT],
             frame_ready: false,
             cart_ram: Vec::new(),
@@ -503,6 +505,7 @@ impl Bus {
         self.cpu_vdc_vce_penalty_cycles = TransientU64(0);
         self.cpu_high_speed_hint = TransientBool(false);
         self.vce_palette_flicker.0.clear();
+        self.sprite_vram_snapshot.0.clear();
         self.framebuffer.fill(0);
         self.frame_ready = false;
         self.cart_ram.fill(0);
@@ -610,6 +613,7 @@ impl Bus {
         self.cpu_vdc_vce_penalty_cycles = TransientU64(0);
         self.cpu_high_speed_hint = TransientBool(false);
         self.vce_palette_flicker.0.clear();
+        self.sprite_vram_snapshot.0.clear();
         self.audio_psg_accumulator = TransientU64(0);
         self.audio_buffer.clear();
         self.audio_total_phi_cycles = TransientU64(0);
@@ -859,6 +863,13 @@ impl Bus {
         }
     }
 
+    fn capture_sprite_vram_snapshot(&mut self) {
+        self.sprite_vram_snapshot.0.clear();
+        self.sprite_vram_snapshot
+            .0
+            .extend_from_slice(&self.vdc.vram);
+    }
+
     pub fn write_io(&mut self, offset: usize, value: u8) {
         self.write_io_internal(offset, value);
         self.refresh_vdc_irq();
@@ -877,8 +888,12 @@ impl Bus {
             self.interrupt_request |= IRQ_REQUEST_TIMER;
         }
 
+        let previous_in_active_display = self.vdc.in_active_display_period();
         if self.vdc.tick(phi_cycles) {
             self.refresh_vdc_irq();
+        }
+        if !previous_in_active_display && self.vdc.in_active_display_period() {
+            self.capture_sprite_vram_snapshot();
         }
 
         if self.vdc.in_vblank && self.vdc.cram_pending {
@@ -1679,6 +1694,7 @@ impl From<CompatBusStateV1> for Bus {
             cpu_vdc_vce_penalty_cycles: value.cpu_vdc_vce_penalty_cycles,
             cpu_high_speed_hint: value.cpu_high_speed_hint,
             vce_palette_flicker: value.vce_palette_flicker,
+            sprite_vram_snapshot: TransientSpriteVramSnapshot::default(),
             framebuffer: value.framebuffer,
             frame_ready: value.frame_ready,
             cart_ram: value.cart_ram,

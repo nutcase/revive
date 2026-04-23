@@ -176,6 +176,50 @@ impl core::ops::DerefMut for TransientPaletteFlicker {
     }
 }
 
+/// Sprite pattern VRAM captured at frame boundaries for the batch renderer.
+/// It is intentionally omitted from save states so old states remain
+/// compatible and reload with an empty snapshot that falls back to live VRAM.
+#[derive(Clone, Default)]
+pub(super) struct TransientSpriteVramSnapshot(pub(super) Vec<u16>);
+
+impl bincode::Encode for TransientSpriteVramSnapshot {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        _encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        Ok(())
+    }
+}
+
+impl<Context> bincode::Decode<Context> for TransientSpriteVramSnapshot {
+    fn decode<D: bincode::de::Decoder>(
+        _decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        Ok(Self::default())
+    }
+}
+
+impl<'de, Context> bincode::BorrowDecode<'de, Context> for TransientSpriteVramSnapshot {
+    fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
+        _decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        Ok(Self::default())
+    }
+}
+
+impl core::ops::Deref for TransientSpriteVramSnapshot {
+    type Target = [u16];
+    fn deref(&self) -> &[u16] {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for TransientSpriteVramSnapshot {
+    fn deref_mut(&mut self) -> &mut [u16] {
+        &mut self.0
+    }
+}
+
 /// A BRAM wrapper that is intentionally excluded from save-state encoding.
 /// Old save states (before BRAM support) remain decodable because this field
 /// consumes zero bytes on decode.
