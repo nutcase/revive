@@ -20,4 +20,5 @@ emulator-gba = { path = "../cores/gameboy/gba" }
 megadrive-core = { path = "../cores/megadrive" }
 nes-emulator = { path = "../cores/nes" }
 pce = { package = "pce-core", path = "../cores/pce" }
+sg1000-core = { path = "../cores/sg1000" }
 snes-core = { path = "../cores/snes" }

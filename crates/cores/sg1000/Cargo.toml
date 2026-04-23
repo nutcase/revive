@@ -1,0 +1,11 @@
+[package]
+name = "sg1000-core"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "sg1000_core"
+path = "src/lib.rs"
+
+[dependencies]
+bincode = { version = "2", features = ["derive"] }

@@ -217,15 +217,15 @@ where
 fn print_usage() {
     println!("Usage:");
     println!(
-        "  revive [rom] [--system nes|snes|megadrive|pce|gb|gbc|gba] [--cheats file.json] [--no-audio]"
+        "  revive [rom] [--system nes|snes|sg1000|megadrive|pce|gb|gbc|gba] [--cheats file.json] [--no-audio]"
     );
     println!(
-        "  revive run [rom] [--system nes|snes|megadrive|pce|gb|gbc|gba] [--cheats file.json] [--no-audio]"
+        "  revive run [rom] [--system nes|snes|sg1000|megadrive|pce|gb|gbc|gba] [--cheats file.json] [--no-audio]"
     );
     println!("  revive --select");
     println!();
     println!("If no ROM path is provided, a local file selection dialog opens.");
-    println!("Supported ROM extensions: .nes, .sfc, .smc, .md, .gen, .pce, .gb, .gbc, .gba, .bin");
+    println!("Supported ROM extensions: .nes, .sfc, .smc, .sg, .sg1000, .md, .gen, .pce, .gb, .gbc, .gba, .bin");
 }
 
 fn resolve_rom_path(options: &Options) -> Option<PathBuf> {
@@ -242,11 +242,12 @@ fn select_rom_path() -> Option<PathBuf> {
         .add_filter(
             "ROM files",
             &[
-                "nes", "sfc", "smc", "md", "gen", "pce", "gb", "gbc", "gba", "bin",
+                "nes", "sfc", "smc", "sg", "sg1000", "md", "gen", "pce", "gb", "gbc", "gba", "bin",
             ],
         )
         .add_filter("NES", &["nes"])
         .add_filter("SNES", &["sfc", "smc"])
+        .add_filter("SG-1000", &["sg", "sg1000"])
         .add_filter("Mega Drive", &["md", "gen", "bin"])
         .add_filter("PC Engine", &["pce"])
         .add_filter("Game Boy", &["gb", "gbc"])
@@ -278,6 +279,7 @@ fn system_dir(system: SystemKind) -> &'static str {
     match system {
         SystemKind::Nes => "nes",
         SystemKind::Snes => "snes",
+        SystemKind::Sg1000 => "sg1000",
         SystemKind::MegaDrive => "megadrive",
         SystemKind::Pce => "pce",
         SystemKind::GameBoy => "gb",
@@ -809,6 +811,7 @@ fn keycode_button(system: SystemKind, key: Keycode) -> Option<VirtualButton> {
     match system {
         SystemKind::Nes => nes_keycode_button(key),
         SystemKind::Snes => snes_keycode_button(key),
+        SystemKind::Sg1000 => sg1000_keycode_button(key),
         SystemKind::MegaDrive => megadrive_keycode_button(key),
         SystemKind::Pce => pce_keycode_button(key),
         SystemKind::GameBoy | SystemKind::GameBoyColor => gameboy_keycode_button(key),
@@ -866,6 +869,18 @@ fn megadrive_keycode_button(key: Keycode) -> Option<VirtualButton> {
     }
 }
 
+fn sg1000_keycode_button(key: Keycode) -> Option<VirtualButton> {
+    match key {
+        Keycode::Up => Some(VirtualButton::Up),
+        Keycode::Down => Some(VirtualButton::Down),
+        Keycode::Left => Some(VirtualButton::Left),
+        Keycode::Right => Some(VirtualButton::Right),
+        Keycode::Z | Keycode::J => Some(VirtualButton::A),
+        Keycode::X | Keycode::K => Some(VirtualButton::B),
+        _ => None,
+    }
+}
+
 fn pce_keycode_button(key: Keycode) -> Option<VirtualButton> {
     match key {
         Keycode::Up => Some(VirtualButton::Up),
@@ -906,6 +921,7 @@ fn button_pressed(system: SystemKind, keyboard: &KeyboardState<'_>, button: Virt
     match system {
         SystemKind::Nes => nes_button_pressed(keyboard, button),
         SystemKind::Snes => snes_button_pressed(keyboard, button),
+        SystemKind::Sg1000 => sg1000_button_pressed(keyboard, button),
         SystemKind::MegaDrive => megadrive_button_pressed(keyboard, button),
         SystemKind::Pce => pce_button_pressed(keyboard, button),
         SystemKind::GameBoy | SystemKind::GameBoyColor => gameboy_button_pressed(keyboard, button),
@@ -965,6 +981,18 @@ fn megadrive_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton)
         VirtualButton::Z => scancode_down(keyboard, &[Scancode::F]),
         VirtualButton::Mode => scancode_down(keyboard, &[Scancode::Q]),
         VirtualButton::Start => scancode_down(keyboard, &[Scancode::Return, Scancode::Space]),
+        _ => false,
+    }
+}
+
+fn sg1000_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
+    match button {
+        VirtualButton::Up => scancode_down(keyboard, &[Scancode::Up]),
+        VirtualButton::Down => scancode_down(keyboard, &[Scancode::Down]),
+        VirtualButton::Left => scancode_down(keyboard, &[Scancode::Left]),
+        VirtualButton::Right => scancode_down(keyboard, &[Scancode::Right]),
+        VirtualButton::A => scancode_down(keyboard, &[Scancode::Z, Scancode::J]),
+        VirtualButton::B => scancode_down(keyboard, &[Scancode::X, Scancode::K]),
         _ => false,
     }
 }
@@ -1067,6 +1095,7 @@ impl FrameClock {
         let fps = match system {
             SystemKind::Nes => 60.0988,
             SystemKind::Snes => 60.0988,
+            SystemKind::Sg1000 => 60.0,
             SystemKind::MegaDrive => 59.9227,
             SystemKind::Pce => 60.0,
             SystemKind::GameBoy | SystemKind::GameBoyColor | SystemKind::GameBoyAdvance => 59.7275,

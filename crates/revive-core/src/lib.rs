@@ -13,6 +13,7 @@ use emulator_gba::{
 use megadrive_core::{Button as MdButton, Cartridge as MdCartridge};
 use nes_emulator::Nes;
 use pce::emulator::Emulator as PceEmulator;
+use sg1000_core::{Button as SgButton, Emulator as SgEmulator};
 use snes_emulator::cartridge::Cartridge as SnesCartridge;
 use snes_emulator::emulator::Emulator as SnesEmulator;
 
@@ -22,6 +23,7 @@ pub type Result<T> = std::result::Result<T, String>;
 pub enum SystemKind {
     Nes,
     Snes,
+    Sg1000,
     MegaDrive,
     Pce,
     GameBoy,
@@ -35,6 +37,7 @@ impl SystemKind {
             "auto" => None,
             "nes" | "fc" | "famicom" => Some(Self::Nes),
             "snes" | "sfc" | "super-famicom" | "superfamicom" => Some(Self::Snes),
+            "sg1000" | "sg-1000" | "sega-sg1000" => Some(Self::Sg1000),
             "md" | "genesis" | "megadrive" | "mega-drive" => Some(Self::MegaDrive),
             "pce" | "pcengine" | "pc-engine" | "tg16" | "turbografx" | "turbografx-16" => {
                 Some(Self::Pce)
@@ -52,6 +55,7 @@ impl SystemKind {
         match self {
             Self::Nes => "NES",
             Self::Snes => "SNES",
+            Self::Sg1000 => "SG-1000",
             Self::MegaDrive => "Mega Drive",
             Self::Pce => "PC Engine",
             Self::GameBoy => "Game Boy",
@@ -64,6 +68,7 @@ impl SystemKind {
         match self {
             Self::Nes => "nes",
             Self::Snes => "snes",
+            Self::Sg1000 => "sg1000",
             Self::MegaDrive => "megadrive",
             Self::Pce => "pce",
             Self::GameBoy => "gb",
@@ -132,6 +137,7 @@ impl Default for AudioSpec {
 pub enum CoreInstance {
     Nes(NesAdapter),
     Snes(Box<SnesAdapter>),
+    Sg1000(Sg1000Adapter),
     MegaDrive(MegaDriveAdapter),
     Pce(Box<PceAdapter>),
     GameBoy(GameBoyAdapter),
@@ -150,6 +156,7 @@ impl CoreInstance {
             SystemKind::Snes => {
                 SnesAdapter::load(path).map(|adapter| Self::Snes(Box::new(adapter)))
             }
+            SystemKind::Sg1000 => Sg1000Adapter::load(path).map(Self::Sg1000),
             SystemKind::MegaDrive => MegaDriveAdapter::load(path).map(Self::MegaDrive),
             SystemKind::Pce => PceAdapter::load(path).map(|adapter| Self::Pce(Box::new(adapter))),
             SystemKind::GameBoy => {
@@ -168,6 +175,7 @@ impl CoreInstance {
         match self {
             Self::Nes(_) => SystemKind::Nes,
             Self::Snes(_) => SystemKind::Snes,
+            Self::Sg1000(_) => SystemKind::Sg1000,
             Self::MegaDrive(_) => SystemKind::MegaDrive,
             Self::Pce(_) => SystemKind::Pce,
             Self::GameBoy(adapter) => adapter.system(),
@@ -179,6 +187,7 @@ impl CoreInstance {
         match self {
             Self::Nes(adapter) => adapter.title(),
             Self::Snes(adapter) => adapter.title(),
+            Self::Sg1000(adapter) => adapter.title(),
             Self::MegaDrive(adapter) => adapter.title(),
             Self::Pce(adapter) => adapter.title(),
             Self::GameBoy(adapter) => adapter.title(),
@@ -190,6 +199,7 @@ impl CoreInstance {
         match self {
             Self::Nes(adapter) => adapter.step_frame(),
             Self::Snes(adapter) => adapter.step_frame(),
+            Self::Sg1000(adapter) => adapter.step_frame(),
             Self::MegaDrive(adapter) => adapter.step_frame(),
             Self::Pce(adapter) => adapter.step_frame(),
             Self::GameBoy(adapter) => adapter.step_frame(),
@@ -201,6 +211,7 @@ impl CoreInstance {
         match self {
             Self::Nes(adapter) => adapter.frame(),
             Self::Snes(adapter) => adapter.frame(),
+            Self::Sg1000(adapter) => adapter.frame(),
             Self::MegaDrive(adapter) => adapter.frame(),
             Self::Pce(adapter) => adapter.frame(),
             Self::GameBoy(adapter) => adapter.frame(),
@@ -212,6 +223,7 @@ impl CoreInstance {
         match self {
             Self::Nes(adapter) => adapter.audio_spec(),
             Self::Snes(adapter) => adapter.audio_spec(),
+            Self::Sg1000(adapter) => adapter.audio_spec(),
             Self::MegaDrive(adapter) => adapter.audio_spec(),
             Self::Pce(adapter) => adapter.audio_spec(),
             Self::GameBoy(adapter) => adapter.audio_spec(),
@@ -223,6 +235,7 @@ impl CoreInstance {
         match self {
             Self::Nes(adapter) => adapter.configure_audio_output(sample_rate_hz),
             Self::Snes(adapter) => adapter.configure_audio_output(sample_rate_hz),
+            Self::Sg1000(adapter) => adapter.configure_audio_output(sample_rate_hz),
             Self::MegaDrive(adapter) => adapter.configure_audio_output(sample_rate_hz),
             Self::Pce(adapter) => adapter.configure_audio_output(sample_rate_hz),
             Self::GameBoy(adapter) => adapter.configure_audio_output(sample_rate_hz),
@@ -234,6 +247,7 @@ impl CoreInstance {
         match self {
             Self::Nes(adapter) => adapter.drain_audio_i16(out),
             Self::Snes(adapter) => adapter.drain_audio_i16(out),
+            Self::Sg1000(adapter) => adapter.drain_audio_i16(out),
             Self::MegaDrive(adapter) => adapter.drain_audio_i16(out),
             Self::Pce(adapter) => adapter.drain_audio_i16(out),
             Self::GameBoy(adapter) => adapter.drain_audio_i16(out),
@@ -245,6 +259,7 @@ impl CoreInstance {
         match self {
             Self::Nes(adapter) => adapter.set_button(player, button, pressed),
             Self::Snes(adapter) => adapter.set_button(player, button, pressed),
+            Self::Sg1000(adapter) => adapter.set_button(player, button, pressed),
             Self::MegaDrive(adapter) => adapter.set_button(player, button, pressed),
             Self::Pce(adapter) => adapter.set_button(player, button, pressed),
             Self::GameBoy(adapter) => adapter.set_button(player, button, pressed),
@@ -256,6 +271,7 @@ impl CoreInstance {
         match self {
             Self::Nes(adapter) => adapter.memory_regions(),
             Self::Snes(adapter) => adapter.memory_regions(),
+            Self::Sg1000(adapter) => adapter.memory_regions(),
             Self::MegaDrive(adapter) => adapter.memory_regions(),
             Self::Pce(adapter) => adapter.memory_regions(),
             Self::GameBoy(adapter) => adapter.memory_regions(),
@@ -267,6 +283,7 @@ impl CoreInstance {
         match self {
             Self::Nes(adapter) => adapter.read_memory(region_id),
             Self::Snes(adapter) => adapter.read_memory(region_id),
+            Self::Sg1000(adapter) => adapter.read_memory(region_id),
             Self::MegaDrive(adapter) => adapter.read_memory(region_id),
             Self::Pce(adapter) => adapter.read_memory(region_id),
             Self::GameBoy(adapter) => adapter.read_memory(region_id),
@@ -278,6 +295,7 @@ impl CoreInstance {
         match self {
             Self::Nes(adapter) => adapter.write_memory_byte(region_id, offset, value),
             Self::Snes(adapter) => adapter.write_memory_byte(region_id, offset, value),
+            Self::Sg1000(adapter) => adapter.write_memory_byte(region_id, offset, value),
             Self::MegaDrive(adapter) => adapter.write_memory_byte(region_id, offset, value),
             Self::Pce(adapter) => adapter.write_memory_byte(region_id, offset, value),
             Self::GameBoy(adapter) => adapter.write_memory_byte(region_id, offset, value),
@@ -289,6 +307,7 @@ impl CoreInstance {
         match self {
             Self::Nes(adapter) => adapter.save_state_to_slot(slot),
             Self::Snes(adapter) => adapter.save_state_to_slot(slot),
+            Self::Sg1000(adapter) => adapter.save_state_to_slot(slot),
             Self::MegaDrive(adapter) => adapter.save_state_to_slot(slot),
             Self::Pce(adapter) => adapter.save_state_to_slot(slot),
             Self::GameBoy(adapter) => adapter.save_state_to_slot(slot),
@@ -300,6 +319,7 @@ impl CoreInstance {
         match self {
             Self::Nes(adapter) => adapter.load_state_from_slot(slot),
             Self::Snes(adapter) => adapter.load_state_from_slot(slot),
+            Self::Sg1000(adapter) => adapter.load_state_from_slot(slot),
             Self::MegaDrive(adapter) => adapter.load_state_from_slot(slot),
             Self::Pce(adapter) => adapter.load_state_from_slot(slot),
             Self::GameBoy(adapter) => adapter.load_state_from_slot(slot),
@@ -311,6 +331,7 @@ impl CoreInstance {
         match self {
             Self::Nes(adapter) => adapter.flush_persistent_save(),
             Self::Snes(adapter) => adapter.flush_persistent_save(),
+            Self::Sg1000(adapter) => adapter.flush_persistent_save(),
             Self::MegaDrive(adapter) => adapter.flush_persistent_save(),
             Self::Pce(adapter) => adapter.flush_persistent_save(),
             Self::GameBoy(adapter) => adapter.flush_persistent_save(),
@@ -329,6 +350,7 @@ pub fn detect_system(path: &Path) -> Result<SystemKind> {
     match ext.as_str() {
         "nes" => return Ok(SystemKind::Nes),
         "sfc" | "smc" => return Ok(SystemKind::Snes),
+        "sg" | "sg1000" => return Ok(SystemKind::Sg1000),
         "md" | "gen" | "genesis" => return Ok(SystemKind::MegaDrive),
         "pce" => return Ok(SystemKind::Pce),
         "gb" => return Ok(SystemKind::GameBoy),
@@ -634,6 +656,121 @@ impl SnesAdapter {
 
     pub fn flush_persistent_save(&mut self) -> Result<()> {
         self.emulator.flush_sram();
+        Ok(())
+    }
+}
+
+pub struct Sg1000Adapter {
+    emulator: SgEmulator,
+    rom_path: PathBuf,
+    title: String,
+    audio_sample_rate_hz: u32,
+}
+
+impl Sg1000Adapter {
+    pub fn load(path: &Path) -> Result<Self> {
+        let rom = std::fs::read(path).map_err(|err| err.to_string())?;
+        let emulator = SgEmulator::new(rom)?;
+        Ok(Self {
+            emulator,
+            rom_path: path.to_path_buf(),
+            title: rom_stem(path),
+            audio_sample_rate_hz: 44_100,
+        })
+    }
+
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    pub fn step_frame(&mut self) -> Result<()> {
+        const MAX_STEPS_PER_FRAME: usize = 2_000;
+        for _ in 0..MAX_STEPS_PER_FRAME {
+            if self.emulator.step().frame_ready {
+                return Ok(());
+            }
+        }
+        Err("SG-1000 frame did not complete before step limit".to_string())
+    }
+
+    pub fn frame(&mut self) -> FrameView<'_> {
+        FrameView {
+            width: self.emulator.frame_width(),
+            height: self.emulator.frame_height(),
+            format: PixelFormat::Rgb24,
+            data: self.emulator.frame_buffer(),
+        }
+    }
+
+    pub fn audio_spec(&self) -> AudioSpec {
+        AudioSpec {
+            sample_rate_hz: self.audio_sample_rate_hz,
+            channels: self.emulator.audio_output_channels(),
+        }
+    }
+
+    pub fn configure_audio_output(&mut self, sample_rate_hz: u32) {
+        self.audio_sample_rate_hz = sample_rate_hz;
+        self.emulator
+            .set_audio_output_sample_rate_hz(sample_rate_hz);
+    }
+
+    pub fn drain_audio_i16(&mut self, out: &mut Vec<i16>) {
+        let max_samples = ((self.audio_sample_rate_hz as usize) / 20).max(1024) * 2;
+        *out = self.emulator.drain_audio_samples(max_samples);
+    }
+
+    pub fn set_button(&mut self, player: u8, button: VirtualButton, pressed: bool) {
+        let Some(button) = sg1000_button(button) else {
+            return;
+        };
+        self.emulator.set_button_pressed(player, button, pressed);
+    }
+
+    pub fn memory_regions(&self) -> Vec<MemoryRegion> {
+        vec![
+            MemoryRegion {
+                id: "wram",
+                label: "Work RAM",
+                len: self.emulator.work_ram().len(),
+                writable: true,
+            },
+            MemoryRegion {
+                id: "vram",
+                label: "VDP VRAM",
+                len: self.emulator.vram().len(),
+                writable: true,
+            },
+        ]
+    }
+
+    pub fn read_memory(&self, region_id: &str) -> Option<&[u8]> {
+        match region_id {
+            "wram" => Some(self.emulator.work_ram()),
+            "vram" => Some(self.emulator.vram()),
+            _ => None,
+        }
+    }
+
+    pub fn write_memory_byte(&mut self, region_id: &str, offset: usize, value: u8) -> bool {
+        match region_id {
+            "wram" => write_byte(self.emulator.work_ram_mut(), offset, value),
+            "vram" => write_byte(self.emulator.vram_mut(), offset, value),
+            _ => false,
+        }
+    }
+
+    pub fn save_state_to_slot(&mut self, slot: u8) -> Result<()> {
+        let path = state_path(SystemKind::Sg1000, &self.rom_path, slot, "sgs");
+        self.emulator.save_state_to_file(&path)
+    }
+
+    pub fn load_state_from_slot(&mut self, slot: u8) -> Result<()> {
+        let path = readable_state_path(SystemKind::Sg1000, &self.rom_path, slot, "sgs")?;
+        self.emulator.load_state_from_file(&path)
+    }
+
+    pub fn flush_persistent_save(&mut self) -> Result<()> {
         Ok(())
     }
 }
@@ -1204,6 +1341,26 @@ fn md_button(button: VirtualButton) -> Option<MdButton> {
     }
 }
 
+fn sg1000_button(button: VirtualButton) -> Option<SgButton> {
+    match button {
+        VirtualButton::Up => Some(SgButton::Up),
+        VirtualButton::Down => Some(SgButton::Down),
+        VirtualButton::Left => Some(SgButton::Left),
+        VirtualButton::Right => Some(SgButton::Right),
+        VirtualButton::A => Some(SgButton::Button1),
+        VirtualButton::B => Some(SgButton::Button2),
+        VirtualButton::X
+        | VirtualButton::Y
+        | VirtualButton::L
+        | VirtualButton::R
+        | VirtualButton::Start
+        | VirtualButton::Select
+        | VirtualButton::C
+        | VirtualButton::Z
+        | VirtualButton::Mode => None,
+    }
+}
+
 fn pce_button_bit(button: VirtualButton) -> Option<u8> {
     match button {
         VirtualButton::Up => Some(0),
@@ -1471,6 +1628,14 @@ mod tests {
         assert_eq!(
             detect_system(Path::new("game.smc")).unwrap(),
             SystemKind::Snes
+        );
+        assert_eq!(
+            detect_system(Path::new("game.sg")).unwrap(),
+            SystemKind::Sg1000
+        );
+        assert_eq!(
+            detect_system(Path::new("game.sg1000")).unwrap(),
+            SystemKind::Sg1000
         );
         assert_eq!(
             detect_system(Path::new("game.md")).unwrap(),

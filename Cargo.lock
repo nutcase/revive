@@ -1658,6 +1658,7 @@ dependencies = [
  "megadrive-core",
  "nes-emulator",
  "pce-core",
+ "sg1000-core",
  "snes-core",
 ]
 
@@ -1829,6 +1830,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "sg1000-core"
+version = "0.1.0"
+dependencies = [
+ "bincode 2.0.1",
 ]
 
 [[package]]

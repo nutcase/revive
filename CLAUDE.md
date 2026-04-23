@@ -10,6 +10,7 @@ Vendored core crates:
 
 - `crates/cores/nes` → `nes-emulator`
 - `crates/cores/snes` → `snes-core` (crate name `snes_emulator`)
+- `crates/cores/sg1000` → `sg1000-core`
 - `crates/cores/megadrive` → `megadrive-core`
 - `crates/cores/pce` → `pce-core` (imported as `pce`)
 - `crates/cores/gameboy/core` → `emulator-core`
@@ -32,6 +33,7 @@ cargo build
 cargo test                          # workspace tests
 cargo test -p revive-cheat
 cargo test -p revive-core detects_megadrive_bin_header
+cargo test -p sg1000-core
 cargo test -p nes-emulator save_state
 cargo test -p snes-core
 ```
@@ -42,7 +44,7 @@ SDL2 is vendored via `sdl2 = { features = ["bundled", "static-link"] }`, so no s
 
 Workspace layout, default binary is `revive-cli`:
 
-- **`revive-core`** — Defines the `CoreInstance` enum that wraps each backend (`NesAdapter`, `SnesAdapter`, `MegaDriveAdapter`, `PceAdapter`) and exposes a uniform surface: `load_rom`, `step_frame`, `frame` (returning an `RGB24` `FrameView`), `audio_spec`/`drain_audio_i16`, `set_button`, `memory_regions`/`read_memory`/`write_memory_byte`, `save_state_to_slot`/`load_state_from_slot`, `flush_persistent_save`. `SystemKind` and `VirtualButton` are the two abstractions every adapter translates to/from its native types. `detect_system` handles extension-based routing, with a `SEGA` header check as the only disambiguator for `.bin`.
+- **`revive-core`** — Defines the `CoreInstance` enum that wraps each backend (`NesAdapter`, `SnesAdapter`, `Sg1000Adapter`, `MegaDriveAdapter`, `PceAdapter`) and exposes a uniform surface: `load_rom`, `step_frame`, `frame` (returning an `RGB24` `FrameView`), `audio_spec`/`drain_audio_i16`, `set_button`, `memory_regions`/`read_memory`/`write_memory_byte`, `save_state_to_slot`/`load_state_from_slot`, `flush_persistent_save`. `SystemKind` and `VirtualButton` are the two abstractions every adapter translates to/from its native types. `detect_system` handles extension-based routing, with a `SEGA` header check as the only disambiguator for `.bin`.
 
 - **`revive-cheat`** — UI-independent. `CheatSearch` runs incremental RAM scans (`SearchFilter` variants split into snapshot-needing vs. value-only in `needs_snapshot`). `CheatManager` persists `CheatEntry` lists as JSON. No dependency on `revive-core` — entries reference regions by string ID (`"wram"`, `"sram"`, `"cpu_ram"`, `"prg_ram"`, `"cart_ram"`, `"bram"`) which the CLI passes straight through to `CoreInstance::write_memory_byte`.
 
@@ -54,12 +56,13 @@ Workspace layout, default binary is `revive-cli`:
 
 - **NES**: controllers are bitmasks (`nes_button_mask`), pushed to the core via `set_controller`/`set_controller2` on every press/release.
 - **SNES**: audio uses `AUDIO_BACKEND=sdl_callback` — the env var is set around `SnesEmulator::new` and restored afterwards. Audio is pulled per-frame with a 60 Hz remainder accumulator in `drain_audio_i16`. Framebuffer is `u32` ARGB and is re-expanded to RGB24 each frame.
+- **SG-1000**: implemented as a separate `sg1000-core` crate, not as a Mega Drive mode. The core has a Z80 CPU, TMS9918A-style VDP, SN76489 PSG, 1 KiB mirrored work RAM, and active-low two-button controller ports. ROM auto-detection uses `.sg`/`.sg1000`; `.bin` remains explicit unless it has a Mega Drive `SEGA` header.
 - **Mega Drive**: both pads default to 6-button. `step_frame` loops `step()` until `frame_ready`.
 - **PC Engine**: joypad is an active-low byte (`pad_state` starts at `0xFF`). HuCard ROMs (`.pce`) load backup RAM (`.sav`) and BRAM (`.brm`) siblings to the ROM on boot; raw binaries are loaded at `$C000`. `flush_persistent_save` only writes if `hucard`.
 
 ### State and save files
 
-Save states live in `states/<system>/<rom-stem>/slot<N>.<ext>` (relative to CWD), created on demand. Extensions: NES `.sav`, SNES `.sns`, MD `.mdst`, PCE `.pcst`, GBA `.gbas`. SRAM/backup is separate and flushed on clean exit only (`core.flush_persistent_save()` in the shutdown path — crashes skip it). Cheats default to `cheats/<system>/<rom-stem>/cheats.json`.
+Save states live in `states/<system>/<rom-stem>/slot<N>.<ext>` (relative to CWD), created on demand. Extensions: NES `.sav`, SNES `.sns`, SG-1000 `.sgs`, MD `.mdst`, PCE `.pcst`, GBA `.gbas`. SRAM/backup is separate and flushed on clean exit only (`core.flush_persistent_save()` in the shutdown path — crashes skip it). Cheats default to `cheats/<system>/<rom-stem>/cheats.json`.
 
 ## Coding notes
 
