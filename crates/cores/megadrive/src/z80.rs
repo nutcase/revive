@@ -2325,6 +2325,9 @@ impl Z80 {
         };
         match aligned {
             0xC00000 | 0xC00002 => {
+                if bus.vdp.trigger_dma_fill_from_data_byte(value) {
+                    return;
+                }
                 if immediate_byte_commit || low_byte_write {
                     bus.vdp.write_data_port(next);
                 }

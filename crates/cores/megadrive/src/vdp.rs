@@ -851,6 +851,15 @@ impl Vdp {
         }
     }
 
+    pub(crate) fn trigger_dma_fill_from_data_byte(&mut self, value: u8) -> bool {
+        if self.dma_fill_pending.is_none() {
+            return false;
+        }
+
+        self.write_data_port(u16::from_be_bytes([value, value]));
+        true
+    }
+
     fn write_data_value(&mut self, value: u16) {
         match self.access_mode {
             AccessMode::VramWrite => {

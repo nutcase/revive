@@ -432,6 +432,9 @@ impl MemoryMap {
                 VdpPort::Data => {
                     self.vdp_data_byte_writes = self.vdp_data_byte_writes.saturating_add(1);
                     self.vdp_data_write_latch = next;
+                    if self.vdp.trigger_dma_fill_from_data_byte(value) {
+                        return;
+                    }
                     if immediate_byte_commit || low_byte_write {
                         let wait = self.vdp.fifo_wait_cycles();
                         self.dma_wait_cycles = self.dma_wait_cycles.saturating_add(wait);
@@ -787,6 +790,30 @@ mod tests {
         memory.write_u8(0xC00001, 0x34);
         assert_eq!(memory.vdp().read_vram_u8(0), 0x12);
         assert_eq!(memory.vdp().read_vram_u8(1), 0x34);
+    }
+
+    #[test]
+    fn vdp_dma_fill_starts_from_data_port_byte_write() {
+        let cart = Cartridge::from_bytes(vec![0; 0x200]).expect("valid cart");
+        let mut memory = MemoryMap::new(cart);
+
+        memory.write_u16(0xC00004, 0x8150); // enable DMA
+        memory.write_u16(0xC00004, 0x8F01); // auto-increment = 1
+        memory.write_u16(0xC00004, 0x9304); // DMA length = 4
+        memory.write_u16(0xC00004, 0x9400);
+        memory.write_u16(0xC00004, 0x9780); // DMA fill
+        memory.write_u16(0xC00004, 0x4000);
+        memory.write_u16(0xC00004, 0x0080); // VRAM write with DMA request
+
+        assert_ne!(memory.read_u16(0xC00004) & 0x0002, 0);
+        memory.write_u8(0xC00000, 0x5A);
+        memory.step_vdp(64);
+
+        assert_eq!(memory.read_u16(0xC00004) & 0x0002, 0);
+        assert_eq!(memory.vdp().read_vram_u8(0), 0x5A);
+        assert_eq!(memory.vdp().read_vram_u8(1), 0x5A);
+        assert_eq!(memory.vdp().read_vram_u8(2), 0x5A);
+        assert_eq!(memory.vdp().read_vram_u8(3), 0x5A);
     }
 
     #[test]
