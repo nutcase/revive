@@ -820,7 +820,9 @@ fn rcr_isr_scroll_writes_apply_on_following_scanline() {
     assert_eq!(vdc.control_values_for_line(10), 0x008C);
 
     vdc.latch_line_state(11);
-    assert_eq!(vdc.scroll_values_for_line(11), (51, 77, 0));
+    // BYR writes during the active area take effect after the h-sync latch,
+    // so the first visible line starts at new_BYR + 1.
+    assert_eq!(vdc.scroll_values_for_line(11), (51, 77, 1));
     assert_eq!(vdc.control_values_for_line(11), 0x00CC);
 }
 

@@ -1316,8 +1316,9 @@ impl Vdc {
         if self.scroll_y_dirty {
             self.scroll_y = self.scroll_y_pending & 0x01FF;
             self.scroll_y_dirty = false;
-            // Writing BYR resets the line offset counter.
-            self.bg_y_offset = 0;
+            // Mid-frame BYR writes are latched at h-sync; the first rendered
+            // line after the write has already advanced one BG row.
+            self.bg_y_offset = if self.bg_y_offset_loaded { 1 } else { 0 };
             self.bg_y_offset_loaded = true;
         }
     }
