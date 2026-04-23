@@ -2014,14 +2014,14 @@ impl M68k {
         self.pc = target;
         // JSR timing per addressing mode
         let cycles = match mode {
-            0b010 => 16,  // (An)
-            0b101 => 18,  // d(An)
-            0b110 => 22,  // d(An,Xn)
+            0b010 => 16, // (An)
+            0b101 => 18, // d(An)
+            0b110 => 22, // d(An,Xn)
             0b111 => match reg {
-                0b000 => 18,  // xxx.W
-                0b001 => 20,  // xxx.L
-                0b010 => 18,  // d(PC)
-                0b011 => 22,  // d(PC,Xn)
+                0b000 => 18, // xxx.W
+                0b001 => 20, // xxx.L
+                0b010 => 18, // d(PC)
+                0b011 => 22, // d(PC,Xn)
                 _ => 16,
             },
             _ => 16,
@@ -2036,14 +2036,14 @@ impl M68k {
         self.pc = target;
         // JMP timing per addressing mode
         let cycles = match mode {
-            0b010 => 8,   // (An)
-            0b101 => 10,  // d(An)
-            0b110 => 14,  // d(An,Xn)
+            0b010 => 8,  // (An)
+            0b101 => 10, // d(An)
+            0b110 => 14, // d(An,Xn)
             0b111 => match reg {
-                0b000 => 10,  // xxx.W
-                0b001 => 12,  // xxx.L
-                0b010 => 10,  // d(PC)
-                0b011 => 14,  // d(PC,Xn)
+                0b000 => 10, // xxx.W
+                0b001 => 12, // xxx.L
+                0b010 => 10, // d(PC)
+                0b011 => 14, // d(PC,Xn)
                 _ => 10,
             },
             _ => 8,
@@ -2504,9 +2504,9 @@ impl M68k {
             0b010 => 12,
             0b101 => 16,
             0b111 => match reg {
-                0b000 => 16,  // xxx.W
-                0b001 => 20,  // xxx.L
-                0b010 => 16,  // d(PC)
+                0b000 => 16, // xxx.W
+                0b001 => 20, // xxx.L
+                0b010 => 16, // d(PC)
                 _ => 16,
             },
             _ => 16,
@@ -2602,9 +2602,9 @@ impl M68k {
             // mem to reg: 12 + n*per_reg (+ ea for non-postinc modes)
             let base = 12 + count * per_reg;
             let ea_extra = match mode {
-                0b011 => 0, // (An)+ has no extra EA cost
-                0b010 => 0, // (An) — no extension
-                0b101 => 8, // d(An)
+                0b011 => 0,  // (An)+ has no extra EA cost
+                0b010 => 0,  // (An) — no extension
+                0b101 => 8,  // d(An)
                 0b110 => 10, // d(An,Xn)
                 0b111 => match reg {
                     0b000 => 8,  // xxx.W
@@ -2620,9 +2620,9 @@ impl M68k {
             // reg to mem: 8 + n*per_reg (+ ea for non-predec modes)
             let base = 8 + count * per_reg;
             let ea_extra = match mode {
-                0b100 => 0, // -(An) has no extra EA cost
-                0b010 => 0, // (An) — no extension
-                0b101 => 8, // d(An)
+                0b100 => 0,  // -(An) has no extra EA cost
+                0b010 => 0,  // (An) — no extension
+                0b101 => 8,  // d(An)
                 0b110 => 10, // d(An,Xn)
                 0b111 => match reg {
                     0b000 => 8,  // xxx.W
@@ -3542,18 +3542,18 @@ impl M68k {
     fn move_dest_base_cycles(dst_mode: u8, dst_reg: usize, is_long: bool) -> u32 {
         let mem_extra = if is_long { 4 } else { 0 };
         match dst_mode {
-            0b000 => 4,                       // Dn (same for all sizes)
-            0b010 => 8 + mem_extra,            // (An)
-            0b011 => 8 + mem_extra,            // (An)+
-            0b100 => 8 + mem_extra,            // -(An)
-            0b101 => 12 + mem_extra,           // d(An)
-            0b110 => 14 + mem_extra,           // d(An,Xn)
+            0b000 => 4,              // Dn (same for all sizes)
+            0b010 => 8 + mem_extra,  // (An)
+            0b011 => 8 + mem_extra,  // (An)+
+            0b100 => 8 + mem_extra,  // -(An)
+            0b101 => 12 + mem_extra, // d(An)
+            0b110 => 14 + mem_extra, // d(An,Xn)
             0b111 => match dst_reg {
-                0b000 => 12 + mem_extra,       // xxx.W
-                0b001 => 16 + mem_extra,       // xxx.L
-                _ => 8 + mem_extra,            // fallback
+                0b000 => 12 + mem_extra, // xxx.W
+                0b001 => 16 + mem_extra, // xxx.L
+                _ => 8 + mem_extra,      // fallback
             },
-            _ => 8 + mem_extra,                // fallback
+            _ => 8 + mem_extra, // fallback
         }
     }
 

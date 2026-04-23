@@ -1022,11 +1022,7 @@ impl Vdp {
     fn dma_length(&self) -> usize {
         let len = ((self.registers[REG_DMA_LENGTH_HIGH] as usize) << 8)
             | self.registers[REG_DMA_LENGTH_LOW] as usize;
-        if len == 0 {
-            0x10000
-        } else {
-            len
-        }
+        if len == 0 { 0x10000 } else { len }
     }
 
     fn clear_dma_length(&mut self) {

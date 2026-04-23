@@ -225,9 +225,7 @@ impl MemoryMap {
 
     /// Returns true when any DMA operation is active (bus, fill, or copy).
     pub fn dma_active(&self) -> bool {
-        self.active_bus_dma.is_some()
-            || !self.pending_bus_dma.is_empty()
-            || self.vdp.dma_busy()
+        self.active_bus_dma.is_some() || !self.pending_bus_dma.is_empty() || self.vdp.dma_busy()
     }
 
     pub fn step_subsystems(&mut self, cpu_cycles: u32) {
@@ -1060,9 +1058,9 @@ mod tests {
         let device_byte: u8 = 0xA0;
         for i in (0..8).rev() {
             let sda_val = if (device_byte >> i) & 1 != 0 { sda } else { 0 };
-            i2c_word_write(&mut memory, sda_val as u16);           // SCL low
-            i2c_word_write(&mut memory, (sda_val | scl) as u16);   // SCL high
-            i2c_word_write(&mut memory, sda_val as u16);           // SCL low
+            i2c_word_write(&mut memory, sda_val as u16); // SCL low
+            i2c_word_write(&mut memory, (sda_val | scl) as u16); // SCL high
+            i2c_word_write(&mut memory, sda_val as u16); // SCL low
         }
         // ACK clock
         i2c_word_write(&mut memory, 0);
@@ -1147,7 +1145,10 @@ mod tests {
             read_byte = (read_byte << 1) | if bit != 0 { 1 } else { 0 };
         }
 
-        assert_eq!(read_byte, 0x55, "EEPROM word-access read should return 0x55");
+        assert_eq!(
+            read_byte, 0x55,
+            "EEPROM word-access read should return 0x55"
+        );
     }
 
     #[test]

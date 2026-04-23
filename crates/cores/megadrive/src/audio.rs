@@ -1,131 +1,95 @@
 // YM2612 hardware sine ROM: quarter-wave log-attenuation (256 entries, 12-bit 4.8 format).
 // logsin[i] = round(-log2(sin((2*i+1) * PI / 1024)) * 256)
 const LOG_SIN_TABLE: [u16; 256] = [
-    2137, 1731, 1543, 1419, 1326, 1252, 1190, 1137,
-    1091, 1050, 1013, 979, 949, 920, 894, 869,
-    846, 825, 804, 785, 767, 749, 732, 717,
-    701, 687, 672, 659, 646, 633, 621, 609,
-    598, 587, 576, 566, 556, 546, 536, 527,
-    518, 509, 501, 492, 484, 476, 468, 461,
-    453, 446, 439, 432, 425, 418, 411, 405,
-    399, 392, 386, 380, 375, 369, 363, 358,
-    352, 347, 341, 336, 331, 326, 321, 316,
-    311, 307, 302, 297, 293, 289, 284, 280,
-    276, 271, 267, 263, 259, 255, 251, 248,
-    244, 240, 236, 233, 229, 226, 222, 219,
-    215, 212, 209, 205, 202, 199, 196, 193,
-    190, 187, 184, 181, 178, 175, 172, 169,
-    167, 164, 161, 159, 156, 153, 151, 148,
-    146, 143, 141, 138, 136, 134, 131, 129,
-    127, 125, 122, 120, 118, 116, 114, 112,
-    110, 108, 106, 104, 102, 100, 98, 96,
-    94, 92, 91, 89, 87, 85, 83, 82,
-    80, 78, 77, 75, 74, 72, 70, 69,
-    67, 66, 64, 63, 62, 60, 59, 57,
-    56, 55, 53, 52, 51, 49, 48, 47,
-    46, 45, 43, 42, 41, 40, 39, 38,
-    37, 36, 35, 34, 33, 32, 31, 30,
-    29, 28, 27, 26, 25, 24, 23, 23,
-    22, 21, 20, 20, 19, 18, 17, 17,
-    16, 15, 15, 14, 13, 13, 12, 12,
-    11, 10, 10, 9, 9, 8, 8, 7,
-    7, 7, 6, 6, 5, 5, 5, 4,
-    4, 4, 3, 3, 3, 2, 2, 2,
-    2, 1, 1, 1, 1, 1, 1, 1,
-    0, 0, 0, 0, 0, 0, 0, 0,
+    2137, 1731, 1543, 1419, 1326, 1252, 1190, 1137, 1091, 1050, 1013, 979, 949, 920, 894, 869, 846,
+    825, 804, 785, 767, 749, 732, 717, 701, 687, 672, 659, 646, 633, 621, 609, 598, 587, 576, 566,
+    556, 546, 536, 527, 518, 509, 501, 492, 484, 476, 468, 461, 453, 446, 439, 432, 425, 418, 411,
+    405, 399, 392, 386, 380, 375, 369, 363, 358, 352, 347, 341, 336, 331, 326, 321, 316, 311, 307,
+    302, 297, 293, 289, 284, 280, 276, 271, 267, 263, 259, 255, 251, 248, 244, 240, 236, 233, 229,
+    226, 222, 219, 215, 212, 209, 205, 202, 199, 196, 193, 190, 187, 184, 181, 178, 175, 172, 169,
+    167, 164, 161, 159, 156, 153, 151, 148, 146, 143, 141, 138, 136, 134, 131, 129, 127, 125, 122,
+    120, 118, 116, 114, 112, 110, 108, 106, 104, 102, 100, 98, 96, 94, 92, 91, 89, 87, 85, 83, 82,
+    80, 78, 77, 75, 74, 72, 70, 69, 67, 66, 64, 63, 62, 60, 59, 57, 56, 55, 53, 52, 51, 49, 48, 47,
+    46, 45, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 23,
+    22, 21, 20, 20, 19, 18, 17, 17, 16, 15, 15, 14, 13, 13, 12, 12, 11, 10, 10, 9, 9, 8, 8, 7, 7,
+    7, 6, 6, 5, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
 // YM2612 hardware exponential ROM: converts 8-bit log mantissa to 10-bit linear.
 // exp[i] = round((pow(2, (255-i)/256.0) - 1.0) * 1024)
 const EXP_TABLE: [u16; 256] = [
-    1018, 1013, 1007, 1002, 996, 991, 986, 980,
-    975, 969, 964, 959, 953, 948, 942, 937,
-    932, 927, 921, 916, 911, 906, 900, 895,
-    890, 885, 880, 874, 869, 864, 859, 854,
-    849, 844, 839, 834, 829, 824, 819, 814,
-    809, 804, 799, 794, 789, 784, 779, 774,
-    770, 765, 760, 755, 750, 745, 741, 736,
-    731, 726, 722, 717, 712, 708, 703, 698,
-    693, 689, 684, 680, 675, 670, 666, 661,
-    657, 652, 648, 643, 639, 634, 630, 625,
-    621, 616, 612, 607, 603, 599, 594, 590,
-    585, 581, 577, 572, 568, 564, 560, 555,
-    551, 547, 542, 538, 534, 530, 526, 521,
-    517, 513, 509, 505, 501, 496, 492, 488,
-    484, 480, 476, 472, 468, 464, 460, 456,
-    452, 448, 444, 440, 436, 432, 428, 424,
-    420, 416, 412, 409, 405, 401, 397, 393,
-    389, 385, 382, 378, 374, 370, 367, 363,
-    359, 355, 352, 348, 344, 340, 337, 333,
-    329, 326, 322, 318, 315, 311, 308, 304,
-    300, 297, 293, 290, 286, 283, 279, 276,
-    272, 268, 265, 262, 258, 255, 251, 248,
-    244, 241, 237, 234, 231, 227, 224, 220,
-    217, 214, 210, 207, 204, 200, 197, 194,
-    190, 187, 184, 181, 177, 174, 171, 168,
-    164, 161, 158, 155, 152, 148, 145, 142,
-    139, 136, 133, 130, 126, 123, 120, 117,
-    114, 111, 108, 105, 102, 99, 96, 93,
-    90, 87, 84, 81, 78, 75, 72, 69,
-    66, 63, 60, 57, 54, 51, 48, 45,
-    42, 40, 37, 34, 31, 28, 25, 22,
-    20, 17, 14, 11, 8, 6, 3, 0,
+    1018, 1013, 1007, 1002, 996, 991, 986, 980, 975, 969, 964, 959, 953, 948, 942, 937, 932, 927,
+    921, 916, 911, 906, 900, 895, 890, 885, 880, 874, 869, 864, 859, 854, 849, 844, 839, 834, 829,
+    824, 819, 814, 809, 804, 799, 794, 789, 784, 779, 774, 770, 765, 760, 755, 750, 745, 741, 736,
+    731, 726, 722, 717, 712, 708, 703, 698, 693, 689, 684, 680, 675, 670, 666, 661, 657, 652, 648,
+    643, 639, 634, 630, 625, 621, 616, 612, 607, 603, 599, 594, 590, 585, 581, 577, 572, 568, 564,
+    560, 555, 551, 547, 542, 538, 534, 530, 526, 521, 517, 513, 509, 505, 501, 496, 492, 488, 484,
+    480, 476, 472, 468, 464, 460, 456, 452, 448, 444, 440, 436, 432, 428, 424, 420, 416, 412, 409,
+    405, 401, 397, 393, 389, 385, 382, 378, 374, 370, 367, 363, 359, 355, 352, 348, 344, 340, 337,
+    333, 329, 326, 322, 318, 315, 311, 308, 304, 300, 297, 293, 290, 286, 283, 279, 276, 272, 268,
+    265, 262, 258, 255, 251, 248, 244, 241, 237, 234, 231, 227, 224, 220, 217, 214, 210, 207, 204,
+    200, 197, 194, 190, 187, 184, 181, 177, 174, 171, 168, 164, 161, 158, 155, 152, 148, 145, 142,
+    139, 136, 133, 130, 126, 123, 120, 117, 114, 111, 108, 105, 102, 99, 96, 93, 90, 87, 84, 81,
+    78, 75, 72, 69, 66, 63, 60, 57, 54, 51, 48, 45, 42, 40, 37, 34, 31, 28, 25, 22, 20, 17, 14, 11,
+    8, 6, 3, 0,
 ];
 
 // Hardware detune table from MAME: phase increment delta indexed by [dt_base (0-3)][keycode (0-31)].
 // DT1 register bits [2:0]: values 4-7 negate the delta.
 const DETUNE_TABLE: [[u8; 32]; 4] = [
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 8, 8, 8, 8],
-    [1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 8, 8, 9, 10, 11, 12, 13, 14, 16, 16, 16, 16],
-    [2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 8, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 20, 22, 22, 22, 22],
+    [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ],
+    [
+        0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 8, 8,
+        8, 8,
+    ],
+    [
+        1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 8, 8, 9, 10, 11, 12, 13, 14,
+        16, 16, 16, 16,
+    ],
+    [
+        2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 8, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19,
+        20, 22, 22, 22, 22,
+    ],
 ];
 
 // Envelope generator increment patterns from MAME (19 groups × 8 counter steps).
 const EG_INC_TABLE: [[u16; 8]; 19] = [
-    [0, 1, 0, 1, 0, 1, 0, 1], //  0: rates 00..11 pattern 0
-    [0, 1, 0, 1, 1, 1, 0, 1], //  1: rates 00..11 pattern 1
-    [0, 1, 1, 1, 0, 1, 1, 1], //  2: rates 00..11 pattern 2
-    [0, 1, 1, 1, 1, 1, 1, 1], //  3: rates 00..11 pattern 3
-    [1, 1, 1, 1, 1, 1, 1, 1], //  4: rate 12 pattern 0
-    [1, 1, 1, 2, 1, 1, 1, 2], //  5: rate 12 pattern 1
-    [1, 2, 1, 2, 1, 2, 1, 2], //  6: rate 12 pattern 2
-    [1, 2, 2, 2, 1, 2, 2, 2], //  7: rate 12 pattern 3
-    [2, 2, 2, 2, 2, 2, 2, 2], //  8: rate 13 pattern 0
-    [2, 2, 2, 4, 2, 2, 2, 4], //  9: rate 13 pattern 1
-    [2, 4, 2, 4, 2, 4, 2, 4], // 10: rate 13 pattern 2
-    [2, 4, 4, 4, 2, 4, 4, 4], // 11: rate 13 pattern 3
-    [4, 4, 4, 4, 4, 4, 4, 4], // 12: rate 14 pattern 0
-    [4, 4, 4, 8, 4, 4, 4, 8], // 13: rate 14 pattern 1
-    [4, 8, 4, 8, 4, 8, 4, 8], // 14: rate 14 pattern 2
-    [4, 8, 8, 8, 4, 8, 8, 8], // 15: rate 14 pattern 3
-    [8, 8, 8, 8, 8, 8, 8, 8], // 16: rate 15+
+    [0, 1, 0, 1, 0, 1, 0, 1],         //  0: rates 00..11 pattern 0
+    [0, 1, 0, 1, 1, 1, 0, 1],         //  1: rates 00..11 pattern 1
+    [0, 1, 1, 1, 0, 1, 1, 1],         //  2: rates 00..11 pattern 2
+    [0, 1, 1, 1, 1, 1, 1, 1],         //  3: rates 00..11 pattern 3
+    [1, 1, 1, 1, 1, 1, 1, 1],         //  4: rate 12 pattern 0
+    [1, 1, 1, 2, 1, 1, 1, 2],         //  5: rate 12 pattern 1
+    [1, 2, 1, 2, 1, 2, 1, 2],         //  6: rate 12 pattern 2
+    [1, 2, 2, 2, 1, 2, 2, 2],         //  7: rate 12 pattern 3
+    [2, 2, 2, 2, 2, 2, 2, 2],         //  8: rate 13 pattern 0
+    [2, 2, 2, 4, 2, 2, 2, 4],         //  9: rate 13 pattern 1
+    [2, 4, 2, 4, 2, 4, 2, 4],         // 10: rate 13 pattern 2
+    [2, 4, 4, 4, 2, 4, 4, 4],         // 11: rate 13 pattern 3
+    [4, 4, 4, 4, 4, 4, 4, 4],         // 12: rate 14 pattern 0
+    [4, 4, 4, 8, 4, 4, 4, 8],         // 13: rate 14 pattern 1
+    [4, 8, 4, 8, 4, 8, 4, 8],         // 14: rate 14 pattern 2
+    [4, 8, 8, 8, 4, 8, 8, 8],         // 15: rate 14 pattern 3
+    [8, 8, 8, 8, 8, 8, 8, 8],         // 16: rate 15+
     [16, 16, 16, 16, 16, 16, 16, 16], // 17: maxed
-    [0, 0, 0, 0, 0, 0, 0, 0], // 18: zero (no change)
+    [0, 0, 0, 0, 0, 0, 0, 0],         // 18: zero (no change)
 ];
 
 // Maps effective rate (0-63) to EG_INC_TABLE row index.
 const EG_RATE_SELECT: [u8; 64] = [
-    18, 18, 2, 3, 0, 1, 2, 3,
-    0, 1, 2, 3, 0, 1, 2, 3,
-    0, 1, 2, 3, 0, 1, 2, 3,
-    0, 1, 2, 3, 0, 1, 2, 3,
-    0, 1, 2, 3, 0, 1, 2, 3,
-    0, 1, 2, 3, 0, 1, 2, 3,
-    4, 5, 6, 7, 8, 9, 10, 11,
-    12, 13, 14, 15, 16, 17, 17, 17,
+    18, 18, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2,
+    3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    16, 17, 17, 17,
 ];
 
 // Maps effective rate (0-63) to counter right-shift amount.
 const EG_RATE_SHIFT: [u8; 64] = [
-    0, 0, 11, 11, 10, 10, 10, 10,
-    9, 9, 9, 9, 8, 8, 8, 8,
-    7, 7, 7, 7, 6, 6, 6, 6,
-    5, 5, 5, 5, 4, 4, 4, 4,
-    3, 3, 3, 3, 2, 2, 2, 2,
-    1, 1, 1, 1, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 11, 11, 10, 10, 10, 10, 9, 9, 9, 9, 8, 8, 8, 8, 7, 7, 7, 7, 6, 6, 6, 6, 5, 5, 5, 5, 4, 4,
+    4, 4, 3, 3, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0,
 ];
 
 // LFO timer increment (16.16 fixed-point) per hardware sample, indexed by LFO rate register.
@@ -137,78 +101,96 @@ const LFO_TIMER_INC: [u32; 8] = [627, 876, 948, 1003, 1083, 1517, 7575, 11370];
 // Each row stores the PM displacement contribution for one FNUM bit at one FMS depth.
 const LFO_PM_OUTPUT: [[u8; 8]; 56] = [
     // FNUM bit 4: 0, 0, 0, 0, 0, 0, 0, 0
-    [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
     // FNUM bit 4, depth 7
-    [0,0,0,0,1,1,1,1],
+    [0, 0, 0, 0, 1, 1, 1, 1],
     // FNUM bit 5: 0..
-    [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
     // FNUM bit 5, depth 6
-    [0,0,0,0,1,1,1,1],
+    [0, 0, 0, 0, 1, 1, 1, 1],
     // FNUM bit 5, depth 7
-    [0,0,1,1,2,2,2,3],
+    [0, 0, 1, 1, 2, 2, 2, 3],
     // FNUM bit 6
-    [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,0,0,0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
     // FNUM bit 6, depth 5
-    [0,0,0,0,1,1,1,1],
+    [0, 0, 0, 0, 1, 1, 1, 1],
     // FNUM bit 6, depth 6
-    [0,0,1,1,2,2,2,3],
+    [0, 0, 1, 1, 2, 2, 2, 3],
     // FNUM bit 6, depth 7
-    [0,0,2,3,4,4,5,6],
+    [0, 0, 2, 3, 4, 4, 5, 6],
     // FNUM bit 7
-    [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
     // FNUM bit 7, depth 4
-    [0,0,0,0,1,1,1,1],
+    [0, 0, 0, 0, 1, 1, 1, 1],
     // FNUM bit 7, depth 5
-    [0,0,1,1,2,2,2,3],
+    [0, 0, 1, 1, 2, 2, 2, 3],
     // FNUM bit 7, depth 6
-    [0,0,2,3,4,4,5,6],
+    [0, 0, 2, 3, 4, 4, 5, 6],
     // FNUM bit 7, depth 7
-    [0,0,4,6,8,8,0x0A,0x0C],
+    [0, 0, 4, 6, 8, 8, 0x0A, 0x0C],
     // FNUM bit 8
-    [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
     // FNUM bit 8, depth 3
-    [0,0,0,0,1,1,1,1],
+    [0, 0, 0, 0, 1, 1, 1, 1],
     // FNUM bit 8, depth 4
-    [0,0,1,1,2,2,2,3],
+    [0, 0, 1, 1, 2, 2, 2, 3],
     // FNUM bit 8, depth 5
-    [0,0,2,3,4,4,5,6],
+    [0, 0, 2, 3, 4, 4, 5, 6],
     // FNUM bit 8, depth 6
-    [0,0,4,6,8,8,0x0A,0x0C],
+    [0, 0, 4, 6, 8, 8, 0x0A, 0x0C],
     // FNUM bit 8, depth 7
-    [0,0,8,0x0C,0x10,0x10,0x14,0x18],
+    [0, 0, 8, 0x0C, 0x10, 0x10, 0x14, 0x18],
     // FNUM bit 9
-    [0,0,0,0,0,0,0,0], [0,0,0,0,0,0,0,0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
     // FNUM bit 9, depth 2
-    [0,0,0,0,1,1,1,1],
+    [0, 0, 0, 0, 1, 1, 1, 1],
     // FNUM bit 9, depth 3
-    [0,0,1,1,2,2,2,3],
+    [0, 0, 1, 1, 2, 2, 2, 3],
     // FNUM bit 9, depth 4
-    [0,0,2,3,4,4,5,6],
+    [0, 0, 2, 3, 4, 4, 5, 6],
     // FNUM bit 9, depth 5
-    [0,0,4,6,8,8,0x0A,0x0C],
+    [0, 0, 4, 6, 8, 8, 0x0A, 0x0C],
     // FNUM bit 9, depth 6
-    [0,0,8,0x0C,0x10,0x10,0x14,0x18],
+    [0, 0, 8, 0x0C, 0x10, 0x10, 0x14, 0x18],
     // FNUM bit 9, depth 7
-    [0,0,0x10,0x18,0x20,0x20,0x28,0x30],
+    [0, 0, 0x10, 0x18, 0x20, 0x20, 0x28, 0x30],
     // FNUM bit 10
-    [0,0,0,0,0,0,0,0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
     // FNUM bit 10, depth 1
-    [0,0,0,0,1,1,1,1],
+    [0, 0, 0, 0, 1, 1, 1, 1],
     // FNUM bit 10, depth 2
-    [0,0,1,1,2,2,2,3],
+    [0, 0, 1, 1, 2, 2, 2, 3],
     // FNUM bit 10, depth 3
-    [0,0,2,3,4,4,5,6],
+    [0, 0, 2, 3, 4, 4, 5, 6],
     // FNUM bit 10, depth 4
-    [0,0,4,6,8,8,0x0A,0x0C],
+    [0, 0, 4, 6, 8, 8, 0x0A, 0x0C],
     // FNUM bit 10, depth 5
-    [0,0,8,0x0C,0x10,0x10,0x14,0x18],
+    [0, 0, 8, 0x0C, 0x10, 0x10, 0x14, 0x18],
     // FNUM bit 10, depth 6
-    [0,0,0x10,0x18,0x20,0x20,0x28,0x30],
+    [0, 0, 0x10, 0x18, 0x20, 0x20, 0x28, 0x30],
     // FNUM bit 10, depth 7
-    [0,0,0x20,0x30,0x40,0x40,0x50,0x60],
+    [0, 0, 0x20, 0x30, 0x40, 0x40, 0x50, 0x60],
 ];
 
 // Hardware fn_note table: maps (fnum >> 7) & 0x0F to note value for keycode calculation.
@@ -286,9 +268,9 @@ struct YmOperator {
     sustain_rate: u8,
     sustain_level: u8,
     release_rate: u8,
-    key_on: bool,       // composite: reg_key_on || csm_key_on
-    reg_key_on: bool,   // key-on from register 0x28
-    csm_key_on: bool,   // key-on from CSM Timer A overflow
+    key_on: bool,     // composite: reg_key_on || csm_key_on
+    reg_key_on: bool, // key-on from register 0x28
+    csm_key_on: bool, // key-on from CSM Timer A overflow
     phase: u32,
     envelope_phase: YmEnvelopePhase,
     envelope_level: u16,
@@ -626,7 +608,8 @@ impl Ym2612 {
                                 // Do not reset envelope_level — real HW continues from current level
                                 // Nuked OPN2: normalize SSG-EG inverted level on key-on
                                 if Self::ssg_eg_enabled(op) && (op.envelope_level & 0x200) != 0 {
-                                    op.envelope_level = (0x200u16.wrapping_sub(op.envelope_level)) & 0x3FF;
+                                    op.envelope_level =
+                                        (0x200u16.wrapping_sub(op.envelope_level)) & 0x3FF;
                                 }
                                 op.ssg_invert = false;
                                 op.ssg_hold_active = false;
@@ -824,7 +807,8 @@ impl Ym2612 {
         operator_index: usize,
         channel3_special_mode: bool,
     ) -> u8 {
-        let (fnum, block) = Self::operator_fnum_block(channel, operator_index, channel3_special_mode);
+        let (fnum, block) =
+            Self::operator_fnum_block(channel, operator_index, channel3_special_mode);
         Self::block_fnum_keycode(block, fnum)
     }
 
@@ -839,9 +823,12 @@ impl Ym2612 {
         } else {
             base + dt_delta
         };
-        if mul == 0 { detuned >> 1 } else { detuned * (mul as u32) }
+        if mul == 0 {
+            detuned >> 1
+        } else {
+            detuned * (mul as u32)
+        }
     }
-
 
     fn key_scale_rate_boost(keycode: u8, key_scale: u8) -> u8 {
         // Nuked OPN2: rks = kc >> (ks ^ 0x03)
@@ -977,8 +964,7 @@ impl Ym2612 {
             }
             YmEnvelopePhase::Release => {
                 // Nuked OPN2: release rate = RR * 4 + 2 + ksv
-                let effective_rate =
-                    ((op.release_rate as u16) * 4 + 2 + ksv).min(63) as u8;
+                let effective_rate = ((op.release_rate as u16) * 4 + 2 + ksv).min(63) as u8;
                 let inc = eg_increment(effective_rate, eg_counter);
                 if inc > 0 {
                     op.envelope_level = (op.envelope_level + inc).min(1023);
@@ -1046,11 +1032,7 @@ impl Ym2612 {
         if displacement == 0 {
             return 0;
         }
-        if pm_sign {
-            -displacement
-        } else {
-            displacement
-        }
+        if pm_sign { -displacement } else { displacement }
     }
 
     /// Advance the global EG counter by one HW sample tick.
@@ -1060,7 +1042,9 @@ impl Ym2612 {
         if self.hw_eg_divider >= 3 {
             self.hw_eg_divider = 0;
             self.eg_counter = self.eg_counter.wrapping_add(1);
-            if self.eg_counter == 0 { self.eg_counter = 1; } // Nuked OPN2: skip 0
+            if self.eg_counter == 0 {
+                self.eg_counter = 1;
+            } // Nuked OPN2: skip 0
             return true;
         }
         false
@@ -1096,7 +1080,11 @@ impl Ym2612 {
         }
 
         // Nuked OPN2: test register bit 0 forces EG output to 0 (max volume)
-        let eg_level = if eg_test { 0 } else { Self::ssg_eg_output_level(op) };
+        let eg_level = if eg_test {
+            0
+        } else {
+            Self::ssg_eg_output_level(op)
+        };
         let mut eg_out = eg_level as u32 + ((op.tl as u32) << 3);
         // AM modulation in 10-bit space
         if op.am_enable {
@@ -1155,8 +1143,7 @@ impl Ym2612 {
         let mut op_phase_incs = [0u32; 4];
         let mut op_keycodes = [0u8; 4];
         for i in 0..4 {
-            let (fnum, block) =
-                Self::operator_fnum_block(channel, i, channel3_special_mode);
+            let (fnum, block) = Self::operator_fnum_block(channel, i, channel3_special_mode);
             let keycode = Self::block_fnum_keycode(block, fnum);
             op_keycodes[i] = keycode;
 
@@ -1453,10 +1440,9 @@ impl Ym2612 {
         let right_dac = Self::dac_9bit_quantize(right_sum);
 
         // Scale quantized output to i16 range.
-        let left = ((left_dac as i64 * 18000) >> 13)
-            .clamp(i16::MIN as i64, i16::MAX as i64) as i16;
-        let right = ((right_dac as i64 * 18000) >> 13)
-            .clamp(i16::MIN as i64, i16::MAX as i64) as i16;
+        let left = ((left_dac as i64 * 18000) >> 13).clamp(i16::MIN as i64, i16::MAX as i64) as i16;
+        let right =
+            ((right_dac as i64 * 18000) >> 13).clamp(i16::MIN as i64, i16::MAX as i64) as i16;
         (left, right)
     }
 
@@ -1793,19 +1779,18 @@ pub struct Psg {
     latched_channel: usize,
     latched_is_volume: bool,
     tone_period: [u16; 3],
-    tone_output: [bool; 3],       // current output state (replaces tone_phase_high)
-    tone_counter: [u16; 3],       // 10-bit downcounters (replaces tone_phase_acc)
+    tone_output: [bool; 3], // current output state (replaces tone_phase_high)
+    tone_counter: [u16; 3], // 10-bit downcounters (replaces tone_phase_acc)
     attenuation: [u8; 4],
     noise_control: u8,
     noise_lfsr: u16,
-    noise_counter: u16,           // noise downcounter (replaces noise_phase_acc)
-    sample_counter: u32,          // Bresenham counter for PSG clock vs output rate
+    noise_counter: u16,  // noise downcounter (replaces noise_phase_acc)
+    sample_counter: u32, // Bresenham counter for PSG clock vs output rate
 }
 
 // Pre-computed: round(8000.0 * 10^(-att*2/20)) for att=0..14, att=15→0
 const PSG_VOLUME: [i16; 16] = [
-    8000, 6355, 5048, 4009, 3184, 2529, 2009, 1596,
-    1268, 1007, 800, 635, 505, 401, 318, 0,
+    8000, 6355, 5048, 4009, 3184, 2529, 2009, 1596, 1268, 1007, 800, 635, 505, 401, 318, 0,
 ];
 
 impl Default for Psg {
@@ -1895,9 +1880,9 @@ impl Psg {
 
     fn noise_period(noise_control: u8, tone3_period: u16) -> u16 {
         match noise_control & 0x03 {
-            0x00 => 0x10,   // clock/512 → period 16
-            0x01 => 0x20,   // clock/1024 → period 32
-            0x02 => 0x40,   // clock/2048 → period 64
+            0x00 => 0x10,             // clock/512 → period 16
+            0x01 => 0x20,             // clock/1024 → period 32
+            0x02 => 0x40,             // clock/2048 → period 64
             _ => tone3_period.max(1), // use tone channel 3 period
         }
     }
@@ -1961,7 +1946,11 @@ impl Psg {
             mix += if self.tone_output[ch] { vol } else { -vol };
         }
         let noise_vol = PSG_VOLUME[self.attenuation[3].min(15) as usize] as i32;
-        mix += if (self.noise_lfsr & 1) != 0 { noise_vol } else { -noise_vol };
+        mix += if (self.noise_lfsr & 1) != 0 {
+            noise_vol
+        } else {
+            -noise_vol
+        };
 
         // Scale to match previous float output level (~1800.0 * amplitude)
         // PSG_VOLUME[0]=8000, old was 1.0*1800=1800, so scale by 1800/8000 ≈ 9/40
@@ -2127,9 +2116,7 @@ impl Default for AudioBus {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        op_calc, Psg, Ym2612, LOG_SIN_TABLE, EXP_TABLE, DETUNE_TABLE,
-    };
+    use super::{DETUNE_TABLE, EXP_TABLE, LOG_SIN_TABLE, Psg, Ym2612, op_calc};
 
     fn write_ym_reg(ym: &mut Ym2612, bank: usize, reg: u8, value: u8) {
         let (addr_port, data_port) = if (bank & 1) == 0 {

@@ -313,8 +313,7 @@ impl Eeprom {
                         self.shift_reg = (self.shift_reg << 1) | (sda as u8);
                         self.bit_counter += 1;
                         if self.bit_counter == 8 {
-                            let addr = self.word_address as usize
-                                % self.eeprom_type.size_bytes();
+                            let addr = self.word_address as usize % self.eeprom_type.size_bytes();
                             self.data[addr] = self.shift_reg;
                             self.word_address = self.word_address.wrapping_add(1)
                                 % self.eeprom_type.size_bytes() as u16;
@@ -344,9 +343,7 @@ fn detect_eeprom(header: &RomHeader, _rom: &[u8]) -> Option<(EepromType, EepromC
     let product = header.product_code.trim();
     // NBA Jam (T-081326, T-081276) — 24C02 at 0x200000
     // NBA Jam Tournament Edition (T-081586) — 24C02
-    if product.contains("T-81326") || product.contains("T-81276")
-        || product.contains("T-81586")
-    {
+    if product.contains("T-81326") || product.contains("T-81276") || product.contains("T-81586") {
         return Some((
             EepromType::X24C02,
             EepromConfig {
@@ -777,19 +774,19 @@ mod tests {
         let send_byte = |cart: &mut Cartridge, byte: u8| {
             for i in (0..8).rev() {
                 let sda_val = if (byte >> i) & 1 != 0 { sda } else { 0 };
-                cart.write_eeprom(0x200000, sda_val);        // SCL low, set SDA
-                cart.write_eeprom(0x200000, sda_val | scl);  // SCL high (rising edge)
-                cart.write_eeprom(0x200000, sda_val);        // SCL low
+                cart.write_eeprom(0x200000, sda_val); // SCL low, set SDA
+                cart.write_eeprom(0x200000, sda_val | scl); // SCL high (rising edge)
+                cart.write_eeprom(0x200000, sda_val); // SCL low
             }
             // ACK clock
-            cart.write_eeprom(0x200000, 0);                  // SCL low, release SDA
-            cart.write_eeprom(0x200000, scl);                // SCL high
-            cart.write_eeprom(0x200000, 0);                  // SCL low
+            cart.write_eeprom(0x200000, 0); // SCL low, release SDA
+            cart.write_eeprom(0x200000, scl); // SCL high
+            cart.write_eeprom(0x200000, 0); // SCL low
         };
 
         // START: SDA falls while SCL high
         cart.write_eeprom(0x200000, scl | sda); // SCL=1, SDA=1
-        cart.write_eeprom(0x200000, scl);       // SCL=1, SDA=0 (START)
+        cart.write_eeprom(0x200000, scl); // SCL=1, SDA=0 (START)
 
         // Device address: 0xA0 (write) = 1010_0000
         send_byte(&mut cart, 0xA0);
@@ -799,30 +796,30 @@ mod tests {
         send_byte(&mut cart, 0x42);
 
         // STOP: SDA rises while SCL high
-        cart.write_eeprom(0x200000, 0);         // SCL=0, SDA=0
-        cart.write_eeprom(0x200000, scl);       // SCL=1, SDA=0
+        cart.write_eeprom(0x200000, 0); // SCL=0, SDA=0
+        cart.write_eeprom(0x200000, scl); // SCL=1, SDA=0
         cart.write_eeprom(0x200000, scl | sda); // SCL=1, SDA=1 (STOP)
 
         // Now read back: START, device addr 0xA0 (write), word addr 0x00, re-START,
         // device addr 0xA1 (read), read 8 bits
         cart.write_eeprom(0x200000, scl | sda);
-        cart.write_eeprom(0x200000, scl);       // START
+        cart.write_eeprom(0x200000, scl); // START
 
         send_byte(&mut cart, 0xA0); // device write
         send_byte(&mut cart, 0x00); // word addr 0
 
         // Re-START
-        cart.write_eeprom(0x200000, sda);       // SCL low, SDA high
+        cart.write_eeprom(0x200000, sda); // SCL low, SDA high
         cart.write_eeprom(0x200000, scl | sda); // SCL high, SDA high
-        cart.write_eeprom(0x200000, scl);       // SCL high, SDA low (START)
+        cart.write_eeprom(0x200000, scl); // SCL high, SDA low (START)
 
         send_byte(&mut cart, 0xA1); // device read
 
         // Read 8 bits
         let mut read_byte = 0u8;
         for _ in 0..8 {
-            cart.write_eeprom(0x200000, 0);     // SCL low
-            cart.write_eeprom(0x200000, scl);   // SCL high
+            cart.write_eeprom(0x200000, 0); // SCL low
+            cart.write_eeprom(0x200000, scl); // SCL high
             let bit = cart.read_eeprom(0x200000) & sda;
             read_byte = (read_byte << 1) | if bit != 0 { 1 } else { 0 };
         }

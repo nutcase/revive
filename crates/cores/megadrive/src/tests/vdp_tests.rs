@@ -1813,7 +1813,11 @@ fn complete_bus_dma_updates_source_and_clears_length_registers() {
     assert_eq!(vdp.register(21), 0x2B);
     assert_eq!(vdp.register(22), 0x1A);
     // Source HIGH should NOT be updated (frozen during transfer).
-    assert_eq!(vdp.register(23) & 0x7F, 0x00, "DMA source high register should be frozen");
+    assert_eq!(
+        vdp.register(23) & 0x7F,
+        0x00,
+        "DMA source high register should be frozen"
+    );
 }
 
 #[test]
@@ -1836,7 +1840,11 @@ fn complete_bus_dma_freezes_source_high_register() {
     assert_eq!(vdp.register(21), 0x1A); // 0x1234 >> 1 = 0x091A, low = 0x1A
     assert_eq!(vdp.register(22), 0x09); // mid = 0x09
     // HIGH should remain frozen at original value
-    assert_eq!(vdp.register(23) & 0x7F, 0x10, "source high register must be frozen");
+    assert_eq!(
+        vdp.register(23) & 0x7F,
+        0x10,
+        "source high register must be frozen"
+    );
 }
 
 #[test]
@@ -1845,7 +1853,7 @@ fn shadow_highlight_dac_accuracy() {
     // Normal level L maps to L*36 (0-252).
     // Shadow = channel >> 1 (4-bit DAC output L vs normal 2L).
     // Highlight = channel + 18, clamped to 255 (4-bit DAC output 2L+1 vs normal 2L).
-    use crate::vdp::{shadow_channel, highlight_channel};
+    use crate::vdp::{highlight_channel, shadow_channel};
     for level in 0..=7u8 {
         let normal = level as u16 * 36;
         let expected_shadow = normal / 2;
@@ -1982,8 +1990,14 @@ fn fifo_status_reports_empty_and_full() {
 
     // Initially FIFO is empty
     let status = vdp.read_control_port();
-    assert!(status & 0x0200 != 0, "FIFO empty bit should be set initially");
-    assert!(status & 0x0100 == 0, "FIFO full bit should be clear initially");
+    assert!(
+        status & 0x0200 != 0,
+        "FIFO empty bit should be set initially"
+    );
+    assert!(
+        status & 0x0100 == 0,
+        "FIFO full bit should be clear initially"
+    );
 
     // Re-set write mode (read_control_port clears latch)
     vdp.write_control_port(0x4000);
@@ -1994,8 +2008,14 @@ fn fifo_status_reports_empty_and_full() {
         vdp.write_data_port(i);
     }
     let status = vdp.read_control_port();
-    assert!(status & 0x0200 == 0, "FIFO empty bit should be clear after writes");
-    assert!(status & 0x0100 != 0, "FIFO full bit should be set after 4 writes");
+    assert!(
+        status & 0x0200 == 0,
+        "FIFO empty bit should be clear after writes"
+    );
+    assert!(
+        status & 0x0100 != 0,
+        "FIFO full bit should be set after 4 writes"
+    );
 
     // Step enough cycles to drain FIFO (at least 4 * 18 = 72 cycles)
     vdp.write_control_port(0x4000);
@@ -2003,6 +2023,12 @@ fn fifo_status_reports_empty_and_full() {
     vdp.step(100);
 
     let status = vdp.read_control_port();
-    assert!(status & 0x0200 != 0, "FIFO empty bit should be set after draining");
-    assert!(status & 0x0100 == 0, "FIFO full bit should be clear after draining");
+    assert!(
+        status & 0x0200 != 0,
+        "FIFO empty bit should be set after draining"
+    );
+    assert!(
+        status & 0x0100 == 0,
+        "FIFO full bit should be clear after draining"
+    );
 }
