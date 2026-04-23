@@ -1390,7 +1390,6 @@ impl Vdp {
         sample_y: usize,
         plane_width_tiles: usize,
         plane_height_tiles: usize,
-        use_64x32_paged_layout: bool,
         scroll_plane_layout: bool,
         plane_paged_layout: bool,
         plane_paged_xmajor: bool,
@@ -1409,7 +1408,6 @@ impl Vdp {
                     tile_y,
                     plane_width_tiles,
                     plane_height_tiles,
-                    use_64x32_paged_layout,
                     plane_paged_layout,
                     plane_paged_xmajor,
                 )
@@ -1477,27 +1475,11 @@ impl Vdp {
         tile_y: usize,
         plane_width_tiles: usize,
         plane_height_tiles: usize,
-        use_64x32_paged_layout: bool,
         paged_layout: bool,
         paged_xmajor: bool,
     ) -> usize {
         let wrapped_x = tile_x % plane_width_tiles.max(1);
         let wrapped_y = tile_y % plane_height_tiles.max(1);
-        // Some 128-cell maps require 64x32-cell paged addressing (2KB pages).
-        if use_64x32_paged_layout {
-            let page_width = plane_width_tiles.max(1).div_ceil(64);
-            let page_height = plane_height_tiles.max(1).div_ceil(32);
-            let page_x = wrapped_x / 64;
-            let page_y = wrapped_y / 32;
-            let in_page_x = wrapped_x & 63;
-            let in_page_y = wrapped_y & 31;
-            let page_index = if paged_xmajor {
-                page_x * page_height + page_y
-            } else {
-                page_y * page_width + page_x
-            };
-            return base + page_index * 64 * 32 * 2 + (in_page_y * 64 + in_page_x) * 2;
-        }
         // Optional diagnostic mode: force 32x32-cell paged probing.
         if paged_layout {
             let page_width = plane_width_tiles.max(1).div_ceil(32);
@@ -1653,11 +1635,6 @@ impl Vdp {
         let line_offset = debug_flags::line_offset();
         let bottom_bg_mask = debug_flags::bottom_bg_mask();
         let hscroll_live = debug_flags::hscroll_live();
-        let disable_64x32_paged = debug_flags::disable_64x32_paged();
-        let disable_64x32_paged_a = debug_flags::disable_64x32_paged_a();
-        let disable_64x32_paged_b = debug_flags::disable_64x32_paged_b();
-        let debug_plane_a_64x32_paged = debug_flags::plane_a_64x32_paged();
-        let debug_plane_b_64x32_paged = debug_flags::plane_b_64x32_paged();
         let disable_comix_roll_fix = debug_flags::disable_comix_roll_fix();
         let comix_roll_offset = debug_flags::comix_roll_y();
         let disable_comix_roll_sparse_mask = debug_flags::disable_comix_roll_sparse_mask();
@@ -1719,13 +1696,6 @@ impl Vdp {
                 Self::plane_tile_dimensions_from_regs(&regs);
             let (window_width_tiles, window_height_tiles) =
                 Self::window_tile_dimensions_from_regs(&regs);
-            let auto_64x32_paged = plane_width_tiles > 64;
-            let plane_a_uses_64x32_paged = !disable_64x32_paged
-                && !disable_64x32_paged_a
-                && (debug_plane_a_64x32_paged || auto_64x32_paged);
-            let plane_b_uses_64x32_paged = !disable_64x32_paged
-                && !disable_64x32_paged_b
-                && (debug_plane_b_64x32_paged || auto_64x32_paged);
             let plane_width_px = plane_width_tiles * 8;
             let plane_height_px = plane_height_tiles * 8;
             let window_width_px = window_width_tiles * 8;
@@ -1822,7 +1792,6 @@ impl Vdp {
                             sample_y,
                             plane_width_tiles,
                             plane_height_tiles,
-                            plane_b_uses_64x32_paged,
                             true,
                             plane_paged_layout_b,
                             plane_paged_xmajor_b,
@@ -1848,7 +1817,6 @@ impl Vdp {
                             false,
                             false,
                             false,
-                            false,
                             interlace_mode_2,
                             interlace_field,
                         )
@@ -1866,7 +1834,6 @@ impl Vdp {
                             sample_y,
                             plane_width_tiles,
                             plane_height_tiles,
-                            plane_a_uses_64x32_paged,
                             true,
                             plane_paged_layout_a,
                             plane_paged_xmajor_a,

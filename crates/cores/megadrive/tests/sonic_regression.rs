@@ -29,9 +29,9 @@ fn setup_plane_a_128x32_lookup_probe(memory: &mut MemoryMap) {
     vdp.write_control_port(0x9003);
     let plane_a_base = 0xC000usize;
 
-    // At (x=0, y=31): paged lookup should read this red tile entry.
+    // At (x=0, y=31): incorrect 64x32 paged lookup would read red.
     let paged_row31 = plane_a_base + 31 * 64 * 2;
-    // Linear lookup would read this green tile entry.
+    // Correct row-major lookup reads green.
     let linear_row31 = plane_a_base + 31 * 128 * 2;
     vdp.write_vram_u8(paged_row31 as u16, 0x00);
     vdp.write_vram_u8((paged_row31 + 1) as u16, 0x01);
@@ -49,7 +49,7 @@ fn setup_plane_a_128x32_lookup_probe(memory: &mut MemoryMap) {
 }
 
 #[test]
-fn sonic3_product_code_enables_plane_a_64x32_paged_regression() {
+fn sonic3_product_code_keeps_linear_plane_a_lookup() {
     let rom = build_rom_with_header(
         "GM MK-1079 -00",
         "SONIC THE HEDGEHOG 3",
@@ -60,7 +60,7 @@ fn sonic3_product_code_enables_plane_a_64x32_paged_regression() {
     setup_plane_a_128x32_lookup_probe(&mut memory);
 
     assert!(memory.step_vdp(130_000));
-    assert_eq!(&memory.frame_buffer()[0..3], &[252, 0, 0]);
+    assert_eq!(&memory.frame_buffer()[0..3], &[0, 252, 0]);
 }
 
 #[test]

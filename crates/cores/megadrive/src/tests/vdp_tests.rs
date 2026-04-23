@@ -1606,10 +1606,9 @@ fn plane_size_code_3_decodes_to_128_cells() {
     // x=0 tile -> red
     vdp.write_vram_u8(plane_a as u16, 0x00);
     vdp.write_vram_u8((plane_a + 1) as u16, 0x01);
-    // On 128x32 maps, the second half of the row lives in the second 64x32
-    // page. Width=64 would wrap this position to x=0; width=128 keeps it
-    // distinct and uses the paged nametable layout.
-    let x64 = plane_a + 64 * 32 * 2;
+    // Width=64 would wrap this position to x=0; width=128 keeps it distinct
+    // in the same row-major nametable.
+    let x64 = plane_a + 64 * 2;
     vdp.write_vram_u8(x64 as u16, 0x00);
     vdp.write_vram_u8((x64 + 1) as u16, 0x02);
 
@@ -1628,7 +1627,7 @@ fn plane_size_code_3_decodes_to_128_cells() {
 }
 
 #[test]
-fn plane_a_64x32_paged_changes_second_page_row_addressing() {
+fn plane_a_128x32_uses_linear_row_major_nametable() {
     let mut vdp = Vdp::new();
     vdp.vram.fill(0);
     vdp.cram.fill(0);
@@ -1643,9 +1642,9 @@ fn plane_a_64x32_paged_changes_second_page_row_addressing() {
     let linear_addr = plane_a + ((128 + 64) * 2);
     let paged_addr = plane_a + 64 * 32 * 2 + 64 * 2;
     vdp.write_vram_u8(linear_addr as u16, 0x00);
-    vdp.write_vram_u8((linear_addr + 1) as u16, 0x01);
+    vdp.write_vram_u8((linear_addr + 1) as u16, 0x02);
     vdp.write_vram_u8(paged_addr as u16, 0x00);
-    vdp.write_vram_u8((paged_addr + 1) as u16, 0x02);
+    vdp.write_vram_u8((paged_addr + 1) as u16, 0x01);
 
     vdp.write_cram_u16(1, encode_md_color(7, 0, 0));
     vdp.write_cram_u16(2, encode_md_color(0, 7, 0));
@@ -1662,7 +1661,7 @@ fn plane_a_64x32_paged_changes_second_page_row_addressing() {
 }
 
 #[test]
-fn plane_b_64x32_paged_changes_second_page_row_addressing() {
+fn plane_b_128x32_uses_linear_row_major_nametable() {
     let mut vdp = Vdp::new();
     vdp.vram.fill(0);
     vdp.cram.fill(0);
@@ -1678,9 +1677,9 @@ fn plane_b_64x32_paged_changes_second_page_row_addressing() {
     let linear_addr = plane_b + ((128 + 64) * 2);
     let paged_addr = plane_b + 64 * 32 * 2 + 64 * 2;
     vdp.write_vram_u8(linear_addr as u16, 0x00);
-    vdp.write_vram_u8((linear_addr + 1) as u16, 0x01);
+    vdp.write_vram_u8((linear_addr + 1) as u16, 0x02);
     vdp.write_vram_u8(paged_addr as u16, 0x00);
-    vdp.write_vram_u8((paged_addr + 1) as u16, 0x02);
+    vdp.write_vram_u8((paged_addr + 1) as u16, 0x01);
 
     vdp.write_cram_u16(1, encode_md_color(7, 0, 0));
     vdp.write_cram_u16(2, encode_md_color(0, 7, 0));

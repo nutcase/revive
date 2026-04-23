@@ -89,17 +89,6 @@ debug_present!(live_cram, "MEGADRIVE_DEBUG_LIVE_CRAM");
 debug_value!(line_offset, "MEGADRIVE_DEBUG_LINE_OFFSET", isize, 0);
 debug_present!(bottom_bg_mask, "MEGADRIVE_DEBUG_BOTTOM_BG_MASK");
 debug_present!(hscroll_live, "MEGADRIVE_DEBUG_HSCROLL_LIVE");
-debug_present!(disable_64x32_paged, "MEGADRIVE_DEBUG_DISABLE_64X32_PAGED");
-debug_present!(
-    disable_64x32_paged_a,
-    "MEGADRIVE_DEBUG_DISABLE_64X32_PAGED_A"
-);
-debug_present!(
-    disable_64x32_paged_b,
-    "MEGADRIVE_DEBUG_DISABLE_64X32_PAGED_B"
-);
-debug_present!(plane_a_64x32_paged, "MEGADRIVE_DEBUG_PLANE_A_64X32_PAGED");
-debug_present!(plane_b_64x32_paged, "MEGADRIVE_DEBUG_PLANE_B_64X32_PAGED");
 debug_present!(
     disable_comix_roll_fix,
     "MEGADRIVE_DEBUG_DISABLE_COMIX_ROLL_FIX"
