@@ -44,7 +44,10 @@ impl EmulatorRuntimeConfig {
             frame_skip_threshold: Self::read_f64_env("FRAME_SKIP_THRESHOLD", 0.95, |v| {
                 v > 0.0 && v < 1.0
             }),
-            apu_step_batch: Self::read_positive_u32_env("APU_STEP_BATCH").unwrap_or(32),
+            // Some SPC drivers stream BRR/sequence data with tight S-CPU/S-SMP handshakes.
+            // Coarser batches let the APU consume stale RAM before the matching port upload
+            // has been serviced.
+            apu_step_batch: Self::read_positive_u32_env("APU_STEP_BATCH").unwrap_or(8),
             apu_step_force: Self::read_positive_u32_env("APU_STEP_FORCE").unwrap_or(2048),
             fast_mode,
             sa1_batch_cpu,

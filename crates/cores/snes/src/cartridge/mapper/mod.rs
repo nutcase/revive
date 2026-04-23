@@ -270,10 +270,10 @@ pub fn map_exhirom(addr: u32) -> usize {
                 0
             }
         }
-        0x40..=0x7D => (bank as usize) * 0x10000 + (offset as usize),
+        0x40..=0x7D => 0x400000 + ((bank - 0x40) as usize) * 0x10000 + (offset as usize),
         0x80..=0xBF => {
             if offset >= 0x8000 {
-                0x400000 + ((bank - 0x80) as usize) * 0x10000 + (offset as usize)
+                ((bank - 0x80) as usize) * 0x10000 + (offset as usize)
             } else {
                 0
             }

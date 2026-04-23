@@ -3,40 +3,55 @@ use super::MemoryMapper;
 
 pub struct ExHiRomMapper;
 
+const EXHIROM_SEGMENT_SIZE: usize = 0x400000;
+
+#[inline]
+fn map_first_segment(logical_addr: usize, rom_size: usize) -> usize {
+    let segment_len = rom_size.min(EXHIROM_SEGMENT_SIZE);
+    if segment_len == 0 {
+        0
+    } else {
+        logical_addr % segment_len
+    }
+}
+
+#[inline]
+fn map_extended_segment(logical_addr: usize, rom_size: usize) -> usize {
+    if rom_size <= EXHIROM_SEGMENT_SIZE {
+        return 0;
+    }
+
+    let segment_len = rom_size - EXHIROM_SEGMENT_SIZE;
+    EXHIROM_SEGMENT_SIZE + (logical_addr % segment_len)
+}
+
 impl MemoryMapper for ExHiRomMapper {
     fn mapper_type(&self) -> MapperType {
         MapperType::ExHiRom
     }
 
     fn map_rom(&self, bank: u8, offset: u16, rom_size: usize) -> usize {
-        // ExHiROM: 00-3F/80-BF high areas map to upper half starting at 0x400000
-        let rom_bank = (bank & 0x3F) as usize;
-        let rom_addr = 0x400000usize
-            .saturating_add(rom_bank * 0x10000)
-            .saturating_add(offset as usize);
-        if rom_addr < rom_size {
-            rom_addr
-        } else if rom_size > 0 {
-            rom_addr % rom_size
-        } else {
-            0
+        let offset = offset as usize;
+        match bank {
+            0x00..=0x3F => map_extended_segment((bank as usize) * 0x10000 + offset, rom_size),
+            0x80..=0xBF => map_first_segment(((bank - 0x80) as usize) * 0x10000 + offset, rom_size),
+            _ => 0,
         }
     }
 
     fn read_sram_region(&self, sram: &[u8], sram_size: usize, bank: u8, offset: u16) -> u8 {
-        // ExHiROM SRAM: same as HiROM (banks $20-$3F/$A0-$BF at $6000-$7FFF)
         if sram_size == 0 {
-            0xFF
-        } else {
-            let bank_index = (bank & 0x3F) as usize;
-            if bank_index < 0x20 {
-                0xFF
-            } else {
-                let sram_addr = (bank_index - 0x20) * 0x2000 + ((offset - 0x6000) as usize);
-                let idx = sram_addr % sram_size;
-                sram[idx]
-            }
+            return 0xFF;
         }
+
+        if !(0x80..=0xBF).contains(&bank) {
+            return 0xFF;
+        }
+
+        let bank_index = (bank - 0x80) as usize;
+        let sram_addr = bank_index * 0x2000 + ((offset - 0x6000) as usize);
+        let idx = sram_addr % sram_size;
+        sram[idx]
     }
 
     fn write_sram_region(
@@ -47,17 +62,15 @@ impl MemoryMapper for ExHiRomMapper {
         offset: u16,
         value: u8,
     ) -> bool {
-        // ExHiROM SRAM: same as HiROM (banks $20-$3F/$A0-$BF only)
-        if sram_size > 0 {
-            let bank_index = (bank & 0x3F) as usize;
-            if bank_index >= 0x20 {
-                let sram_addr = (bank_index - 0x20) * 0x2000 + ((offset - 0x6000) as usize);
-                let idx = sram_addr % sram_size;
-                sram[idx] = value;
-                return true;
-            }
+        if sram_size == 0 || !(0x80..=0xBF).contains(&bank) {
+            return false;
         }
-        false
+
+        let bank_index = (bank - 0x80) as usize;
+        let sram_addr = bank_index * 0x2000 + ((offset - 0x6000) as usize);
+        let idx = sram_addr % sram_size;
+        sram[idx] = value;
+        true
     }
 
     fn read_bank_40_7d(
@@ -69,10 +82,12 @@ impl MemoryMapper for ExHiRomMapper {
         bank: u8,
         offset: u16,
     ) -> u8 {
-        // ExHiROM: banks 40-7D map to lower half of ROM (0x000000..)
-        let rom_addr = (bank as usize) * 0x10000 + (offset as usize);
-        if rom_addr < rom_size {
-            rom[rom_addr]
+        let rom_addr = map_extended_segment(
+            ((bank - 0x40) as usize) * 0x10000 + offset as usize,
+            rom_size,
+        );
+        if rom_size > 0 {
+            rom[rom_addr % rom_size]
         } else {
             0xFF
         }
@@ -99,11 +114,12 @@ impl MemoryMapper for ExHiRomMapper {
         bank: u8,
         offset: u16,
     ) -> u8 {
-        // ExHiROM: banks C0-FF mirror to 00-3F area
-        let mirror_bank = bank - 0xC0; // C0->00 .. FF->3F
-        let rom_addr = (mirror_bank as usize) * 0x10000 + (offset as usize);
-        if rom_addr < rom_size {
-            rom[rom_addr]
+        let rom_addr = map_first_segment(
+            ((bank - 0xC0) as usize) * 0x10000 + offset as usize,
+            rom_size,
+        );
+        if rom_size > 0 {
+            rom[rom_addr % rom_size]
         } else {
             0xFF
         }
@@ -111,19 +127,12 @@ impl MemoryMapper for ExHiRomMapper {
 
     fn write_bank_c0_ff(
         &self,
-        sram: &mut [u8],
+        _sram: &mut [u8],
         _sram_size: usize,
-        bank: u8,
-        offset: u16,
-        value: u8,
+        _bank: u8,
+        _offset: u16,
+        _value: u8,
     ) -> bool {
-        if (0x6000..0x8000).contains(&offset) {
-            let sram_addr = ((bank - 0xC0) as usize) * 0x2000 + ((offset - 0x6000) as usize);
-            if sram_addr < sram.len() {
-                sram[sram_addr] = value;
-                return true;
-            }
-        }
         false
     }
 
