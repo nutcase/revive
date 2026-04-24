@@ -73,6 +73,7 @@ impl Cartridge {
             irq_cycle_mode: m.irq_cycle_mode,
             irq_prescaler: m.irq_prescaler,
             irq_pending: m.irq_pending.get(),
+            audio: m.audio.snapshot_state(),
         });
 
         ExpansionSnapshotStates {

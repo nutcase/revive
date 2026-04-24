@@ -36,8 +36,13 @@ impl Cartridge {
             (0x8000, 1) => vrc7.prg_banks[1] = data & 0x3F,
             (0x9000, 0) => vrc7.prg_banks[2] = data & 0x3F,
             (0x9000, _) => {
-                // $9010/$9030 are VRC7 FM sound ports. They are intentionally
-                // ignored until the FM unit is implemented.
+                if !vrc7.audio_silenced {
+                    if addr & 0x0020 == 0 {
+                        vrc7.audio.write_select(data);
+                    } else {
+                        vrc7.audio.write_data(data);
+                    }
+                }
             }
             (0xA000..=0xD000, 0 | 1) => {
                 let base = match addr & 0xF000 {
@@ -57,6 +62,9 @@ impl Cartridge {
                 vrc7.control = data;
                 vrc7.wram_enabled = data & 0x80 != 0;
                 vrc7.audio_silenced = data & 0x40 != 0;
+                if vrc7.audio_silenced {
+                    vrc7.audio.reset();
+                }
                 mirroring = Some(match data & 0x03 {
                     0 => Mirroring::Vertical,
                     1 => Mirroring::Horizontal,

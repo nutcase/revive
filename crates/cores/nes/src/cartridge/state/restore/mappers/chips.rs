@@ -75,6 +75,7 @@ impl Cartridge {
             vrc7.irq_cycle_mode = saved.irq_cycle_mode;
             vrc7.irq_prescaler = saved.irq_prescaler;
             vrc7.irq_pending.set(saved.irq_pending);
+            vrc7.audio.restore_state(&saved.audio);
             self.prg_bank = saved.prg_banks[0];
             self.chr_bank = saved.chr_banks[0];
             self.mirroring = match saved.control & 0x03 {

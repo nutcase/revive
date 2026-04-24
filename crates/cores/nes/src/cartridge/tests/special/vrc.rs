@@ -167,6 +167,17 @@ fn mapper_24_vrc6_chr_ram_writes_use_selected_1k_banks() {
 #[test]
 fn mapper_85_vrc7_switches_banks_irq_wram_and_restores_state() {
     let mut cart = make_vrc7_cart();
+    fn write_audio_reg(cart: &mut Cartridge, register: u8, data: u8) {
+        cart.write_prg(0x9010, register);
+        cart.write_prg(0x9030, data);
+    }
+    fn audio_peak(cart: &mut Cartridge, cycles: usize) -> f32 {
+        let mut peak = 0.0f32;
+        for _ in 0..cycles {
+            peak = peak.max(cart.clock_expansion_audio().abs());
+        }
+        peak
+    }
 
     cart.write_prg(0x8000, 0x04);
     cart.write_prg(0x8010, 0x05);
@@ -195,13 +206,19 @@ fn mapper_85_vrc7_switches_banks_irq_wram_and_restores_state() {
     cart.clock_irq_counter_cycles(1);
     assert!(cart.irq_pending());
 
+    write_audio_reg(&mut cart, 0x10, 0x80);
+    write_audio_reg(&mut cart, 0x20, 0x19);
+    write_audio_reg(&mut cart, 0x30, 0x10);
+    assert!(audio_peak(&mut cart, 8000) > 0.001);
+
     let snapshot = cart.snapshot_state();
     cart.write_prg(0x8000, 0x00);
     cart.write_prg(0x8010, 0x01);
     cart.write_prg(0x9000, 0x02);
-    cart.write_prg(0xE000, 0x00);
+    cart.write_prg(0xE000, 0x40);
     cart.write_prg_ram(0x6002, 0x00);
     cart.acknowledge_irq();
+    assert_eq!(audio_peak(&mut cart, 8000), 0.0);
 
     cart.restore_state(&snapshot);
 
@@ -211,6 +228,7 @@ fn mapper_85_vrc7_switches_banks_irq_wram_and_restores_state() {
     assert_eq!(cart.read_prg_ram(0x6002), 0x77);
     assert_eq!(cart.mirroring(), Mirroring::OneScreenUpper);
     assert!(cart.irq_pending());
+    assert!(audio_peak(&mut cart, 8000) > 0.001);
 }
 
 #[test]

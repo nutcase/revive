@@ -162,6 +162,40 @@ pub struct Vrc7State {
     pub irq_cycle_mode: bool,
     pub irq_prescaler: i16,
     pub irq_pending: bool,
+    #[serde(default)]
+    pub audio: Vrc7AudioState,
+}
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct Vrc7OperatorState {
+    pub phase: f32,
+    pub envelope: f32,
+    pub state: u8,
+    pub last_output: f32,
+}
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct Vrc7ChannelState {
+    pub modulator: Vrc7OperatorState,
+    pub carrier: Vrc7OperatorState,
+    pub key_on: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Vrc7AudioState {
+    pub register_select: u8,
+    pub registers: Vec<u8>,
+    pub update_accumulator: f32,
+    pub last_output: f32,
+    pub channels: [Vrc7ChannelState; 6],
+}
+impl Default for Vrc7AudioState {
+    fn default() -> Self {
+        Self {
+            register_select: 0,
+            registers: vec![0; 0x40],
+            update_accumulator: 0.0,
+            last_output: 0.0,
+            channels: [Vrc7ChannelState::default(); 6],
+        }
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sunsoft3State {

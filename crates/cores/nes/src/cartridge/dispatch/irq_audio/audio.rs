@@ -9,6 +9,8 @@ impl Cartridge {
             fme7.audio.clock()
         } else if self.uses_vrc6() {
             self.clock_audio_vrc6()
+        } else if self.uses_vrc7() {
+            self.clock_audio_vrc7()
         } else if self.uses_namco163() {
             self.clock_audio_namco163()
         } else {

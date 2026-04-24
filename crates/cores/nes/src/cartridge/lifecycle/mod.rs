@@ -28,6 +28,10 @@ impl Cartridge {
         matches!(self.mapper, 24 | 26)
     }
 
+    pub(in crate::cartridge) fn uses_vrc7(&self) -> bool {
+        self.mapper == 85
+    }
+
     pub(in crate::cartridge) fn uses_mapper48(&self) -> bool {
         self.mapper == 48
     }

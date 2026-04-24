@@ -1,9 +1,12 @@
 use std::cell::Cell;
 
+mod audio;
 mod chr;
 mod irq;
 mod prg;
 mod ram;
+
+pub(in crate::cartridge) use audio::Vrc7Audio;
 
 #[derive(Debug, Clone)]
 pub(in crate::cartridge) struct Vrc7 {
@@ -19,6 +22,7 @@ pub(in crate::cartridge) struct Vrc7 {
     pub(in crate::cartridge) irq_cycle_mode: bool,
     pub(in crate::cartridge) irq_prescaler: i16,
     pub(in crate::cartridge) irq_pending: Cell<bool>,
+    pub(in crate::cartridge) audio: Vrc7Audio,
 }
 
 impl Vrc7 {
@@ -36,6 +40,7 @@ impl Vrc7 {
             irq_cycle_mode: false,
             irq_prescaler: 341,
             irq_pending: Cell::new(false),
+            audio: Vrc7Audio::new(),
         }
     }
 }
