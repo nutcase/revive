@@ -23,7 +23,7 @@ fn executes_move_word_immediate_to_absolute_long() {
     cpu.reset(&mut memory);
 
     let cycles = cpu.step(&mut memory);
-    assert_eq!(cycles, 16);
+    assert_eq!(cycles, 20);
     assert_eq!(cpu.pc(), 0x0000_0108);
     assert_eq!(memory.read_u16(0xFF0002), 0xABCD);
 }

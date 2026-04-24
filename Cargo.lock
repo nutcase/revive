@@ -1155,6 +1155,7 @@ name = "mastersystem-core"
 version = "0.1.0"
 dependencies = [
  "bincode 2.0.1",
+ "sega8-common",
 ]
 
 [[package]]
@@ -1787,6 +1788,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sega8-common"
+version = "0.1.0"
+dependencies = [
+ "bincode 2.0.1",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1845,6 +1853,7 @@ name = "sg1000-core"
 version = "0.1.0"
 dependencies = [
  "bincode 2.0.1",
+ "sega8-common",
 ]
 
 [[package]]

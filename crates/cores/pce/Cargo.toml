@@ -9,7 +9,8 @@ path = "src/lib.rs"
 
 [features]
 default = []
-trace_hw_writes = []
+runtime-debug-flags = []
+trace_hw_writes = ["runtime-debug-flags"]
 
 [dependencies]
 bincode = { version = "2.0.1", features = ["derive"] }

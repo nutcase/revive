@@ -1,12 +1,11 @@
 [package]
-name = "sg1000-core"
+name = "sega8-common"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "sg1000_core"
+name = "sega8_common"
 path = "src/lib.rs"
 
 [dependencies]
 bincode = { version = "2", features = ["derive"] }
-sega8-common = { path = "../sega8-common" }

@@ -3,6 +3,14 @@ use super::Bus;
 /// Cached env-var flag: returns `true` when the env var is set (`.is_ok()`).
 macro_rules! env_bool {
     ($name:ident, $var:expr) => {
+        #[cfg(not(feature = "runtime-debug-flags"))]
+        #[inline(always)]
+        pub(crate) fn $name() -> bool {
+            let _ = $var;
+            false
+        }
+
+        #[cfg(feature = "runtime-debug-flags")]
         #[inline]
         pub(crate) fn $name() -> bool {
             use std::sync::OnceLock;
@@ -15,6 +23,14 @@ macro_rules! env_bool {
 /// Cached env-var flag: returns `true` only when the env var is set to `"1"`.
 macro_rules! env_bool_eq1 {
     ($name:ident, $var:expr) => {
+        #[cfg(not(feature = "runtime-debug-flags"))]
+        #[inline(always)]
+        pub(crate) fn $name() -> bool {
+            let _ = $var;
+            false
+        }
+
+        #[cfg(feature = "runtime-debug-flags")]
         #[inline]
         pub(crate) fn $name() -> bool {
             use std::sync::OnceLock;
@@ -27,6 +43,14 @@ macro_rules! env_bool_eq1 {
 /// Cached env-var parsed as `i32` (decimal) with a default.
 macro_rules! env_i32 {
     ($name:ident, $var:expr, $default:expr) => {
+        #[cfg(not(feature = "runtime-debug-flags"))]
+        #[inline(always)]
+        pub(crate) fn $name() -> i32 {
+            let _ = $var;
+            $default
+        }
+
+        #[cfg(feature = "runtime-debug-flags")]
         #[inline]
         pub(crate) fn $name() -> i32 {
             use std::sync::OnceLock;
@@ -44,6 +68,14 @@ macro_rules! env_i32 {
 /// Cached env-var parsed as `Option<usize>` (with optional `> 0` filter).
 macro_rules! env_option_usize {
     ($name:ident, $var:expr) => {
+        #[cfg(not(feature = "runtime-debug-flags"))]
+        #[inline(always)]
+        pub(crate) fn $name() -> Option<usize> {
+            let _ = $var;
+            None
+        }
+
+        #[cfg(feature = "runtime-debug-flags")]
         pub(crate) fn $name() -> Option<usize> {
             use std::sync::OnceLock;
             static V: OnceLock<Option<usize>> = OnceLock::new();
@@ -55,6 +87,14 @@ macro_rules! env_option_usize {
         }
     };
     ($name:ident, $var:expr, nonzero) => {
+        #[cfg(not(feature = "runtime-debug-flags"))]
+        #[inline(always)]
+        pub(crate) fn $name() -> Option<usize> {
+            let _ = $var;
+            None
+        }
+
+        #[cfg(feature = "runtime-debug-flags")]
         pub(crate) fn $name() -> Option<usize> {
             use std::sync::OnceLock;
             static V: OnceLock<Option<usize>> = OnceLock::new();
@@ -116,6 +156,13 @@ impl Bus {
     env_option_usize!(env_sprite_max_entries, "PCE_SPR_MAX_ENTRIES");
 
     // Special env helpers with custom parsing (hex u8, hex-or-decimal i32)
+    #[cfg(not(feature = "runtime-debug-flags"))]
+    #[inline(always)]
+    pub(crate) fn env_pad_default() -> u8 {
+        0xFF
+    }
+
+    #[cfg(feature = "runtime-debug-flags")]
     #[inline]
     pub(crate) fn env_pad_default() -> u8 {
         use std::sync::OnceLock;
@@ -128,6 +175,13 @@ impl Bus {
         })
     }
 
+    #[cfg(not(feature = "runtime-debug-flags"))]
+    #[inline(always)]
+    pub(crate) fn env_irq_status_default() -> Option<u8> {
+        None
+    }
+
+    #[cfg(feature = "runtime-debug-flags")]
     #[inline]
     pub(crate) fn env_irq_status_default() -> Option<u8> {
         use std::sync::OnceLock;
@@ -139,6 +193,13 @@ impl Bus {
         })
     }
 
+    #[cfg(not(feature = "runtime-debug-flags"))]
+    #[inline(always)]
+    pub(crate) fn env_bg_map_base_bias() -> i32 {
+        0
+    }
+
+    #[cfg(feature = "runtime-debug-flags")]
     pub(crate) fn env_bg_map_base_bias() -> i32 {
         use std::sync::OnceLock;
         static V: OnceLock<i32> = OnceLock::new();
@@ -154,6 +215,13 @@ impl Bus {
         })
     }
 
+    #[cfg(not(feature = "runtime-debug-flags"))]
+    #[inline(always)]
+    pub(crate) fn env_bg_tile_base_bias() -> i32 {
+        0
+    }
+
+    #[cfg(feature = "runtime-debug-flags")]
     pub(crate) fn env_bg_tile_base_bias() -> i32 {
         use std::sync::OnceLock;
         static V: OnceLock<i32> = OnceLock::new();
@@ -169,6 +237,13 @@ impl Bus {
         })
     }
 
+    #[cfg(not(feature = "runtime-debug-flags"))]
+    #[inline(always)]
+    pub(crate) fn env_route_02xx_hw() -> bool {
+        true
+    }
+
+    #[cfg(feature = "runtime-debug-flags")]
     pub(crate) fn env_route_02xx_hw() -> bool {
         use std::sync::OnceLock;
         static FLAG: OnceLock<bool> = OnceLock::new();

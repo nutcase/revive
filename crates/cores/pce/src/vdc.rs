@@ -243,6 +243,14 @@ pub(crate) struct Vdc {
 /// Cached env-var flag: returns `true` when the env var is set (`.is_ok()`).
 macro_rules! env_bool {
     ($name:ident, $var:expr) => {
+        #[cfg(not(feature = "runtime-debug-flags"))]
+        #[inline(always)]
+        fn $name() -> bool {
+            let _ = $var;
+            false
+        }
+
+        #[cfg(feature = "runtime-debug-flags")]
         #[inline]
         fn $name() -> bool {
             use std::sync::OnceLock;
@@ -255,6 +263,14 @@ macro_rules! env_bool {
 /// Cached env-var parsed as `u32` with a non-zero filter and default.
 macro_rules! env_u32 {
     ($name:ident, $var:expr, $default:expr) => {
+        #[cfg(not(feature = "runtime-debug-flags"))]
+        #[inline(always)]
+        fn $name() -> u32 {
+            let _ = $var;
+            $default
+        }
+
+        #[cfg(feature = "runtime-debug-flags")]
         #[inline]
         fn $name() -> u32 {
             use std::sync::OnceLock;
@@ -346,6 +362,7 @@ impl Vdc {
         vdc.registers[0x0B] = 0x0010;
         vdc.refresh_activity_flags();
         // Debug: optionally force status bits at power-on to unblock BIOS waits.
+        #[cfg(feature = "runtime-debug-flags")]
         if let Some(mask) = std::env::var("PCE_FORCE_VDC_STATUS")
             .ok()
             .and_then(|s| u8::from_str_radix(&s, 16).ok())

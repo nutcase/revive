@@ -8,6 +8,7 @@ default-run = "revive"
 default = []
 snes-runtime-debug-flags = ["revive-core/snes-runtime-debug-flags"]
 megadrive-runtime-debug-flags = ["revive-core/megadrive-runtime-debug-flags"]
+pce-runtime-debug-flags = ["revive-core/pce-runtime-debug-flags"]
 gba-runtime-debug-trace = ["revive-core/gba-runtime-debug-trace"]
 
 [dependencies]

@@ -115,3 +115,21 @@ impl Bus {
         self.vdp.frame_count()
     }
 }
+
+impl sega8_common::z80::BusIo for Bus {
+    fn read_memory(&mut self, addr: u16) -> u8 {
+        Bus::read_memory(self, addr)
+    }
+
+    fn write_memory(&mut self, addr: u16, value: u8) {
+        Bus::write_memory(self, addr, value);
+    }
+
+    fn read_port(&mut self, port: u8) -> u8 {
+        Bus::read_port(self, port)
+    }
+
+    fn write_port(&mut self, port: u8, value: u8) {
+        Bus::write_port(self, port, value);
+    }
+}

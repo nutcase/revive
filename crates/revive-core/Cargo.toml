@@ -11,6 +11,7 @@ path = "src/lib.rs"
 default = []
 snes-runtime-debug-flags = ["snes-core/runtime-debug-flags"]
 megadrive-runtime-debug-flags = ["megadrive-core/runtime-debug-flags"]
+pce-runtime-debug-flags = ["pce/runtime-debug-flags"]
 gba-runtime-debug-trace = ["emulator-gba/runtime-debug-trace"]
 
 [dependencies]

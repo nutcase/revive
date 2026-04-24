@@ -7,6 +7,7 @@ members = [
     "crates/cores/megadrive",
     "crates/cores/nes",
     "crates/cores/pce",
+    "crates/cores/sega8-common",
     "crates/cores/sg1000",
     "crates/cores/snes",
     "crates/revive-core",

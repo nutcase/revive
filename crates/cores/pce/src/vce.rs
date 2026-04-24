@@ -167,14 +167,22 @@ impl Vce {
 
     #[inline]
     fn brightness_override() -> Option<u8> {
-        use std::sync::OnceLock;
-        static OVERRIDE: OnceLock<Option<u8>> = OnceLock::new();
-        *OVERRIDE.get_or_init(|| {
-            std::env::var("PCE_FORCE_BRIGHTNESS")
-                .ok()
-                .and_then(|s| u8::from_str_radix(&s, 16).ok())
-                .map(|v| v & 0x0F)
-        })
+        #[cfg(not(feature = "runtime-debug-flags"))]
+        {
+            None
+        }
+
+        #[cfg(feature = "runtime-debug-flags")]
+        {
+            use std::sync::OnceLock;
+            static OVERRIDE: OnceLock<Option<u8>> = OnceLock::new();
+            *OVERRIDE.get_or_init(|| {
+                std::env::var("PCE_FORCE_BRIGHTNESS")
+                    .ok()
+                    .and_then(|s| u8::from_str_radix(&s, 16).ok())
+                    .map(|v| v & 0x0F)
+            })
+        }
     }
 
     pub(crate) fn palette_word(&self, index: usize) -> u16 {
