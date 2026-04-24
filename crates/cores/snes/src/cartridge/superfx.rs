@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::cell::Cell;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicU32, Ordering};
+#[cfg(not(test))]
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::Ordering;
 use std::sync::OnceLock;
 
 const GSU_REGISTER_COUNT: usize = 16;
@@ -50,7 +54,13 @@ const SFR_IRQ_BIT: u16 = 0x8000;
 const SCMR_RON_BIT: u8 = 0x10;
 const SCMR_RAN_BIT: u8 = 0x08;
 
+#[cfg(not(test))]
 static TRACE_SUPERFX_EXEC_FRAME: AtomicU32 = AtomicU32::new(0);
+
+#[cfg(test)]
+thread_local! {
+    static TRACE_SUPERFX_EXEC_FRAME: Cell<u32> = const { Cell::new(0) };
+}
 
 enum TraceSuperfxRamAddrConfig {
     Range { start_addr: u16, end_addr: u16 },
@@ -292,12 +302,23 @@ fn trace_superfx_exec_frame_matches(frame: u64) -> bool {
 }
 
 pub fn set_trace_superfx_exec_frame(frame: u64) {
-    TRACE_SUPERFX_EXEC_FRAME.store(frame.min(u64::from(u32::MAX)) as u32, Ordering::Relaxed);
+    let frame = frame.min(u64::from(u32::MAX)) as u32;
+    #[cfg(not(test))]
+    TRACE_SUPERFX_EXEC_FRAME.store(frame, Ordering::Relaxed);
+    #[cfg(test)]
+    TRACE_SUPERFX_EXEC_FRAME.with(|value| value.set(frame));
 }
 
 #[inline]
 fn current_trace_superfx_frame() -> u32 {
-    TRACE_SUPERFX_EXEC_FRAME.load(Ordering::Relaxed)
+    #[cfg(not(test))]
+    {
+        TRACE_SUPERFX_EXEC_FRAME.load(Ordering::Relaxed)
+    }
+    #[cfg(test)]
+    {
+        TRACE_SUPERFX_EXEC_FRAME.with(Cell::get)
+    }
 }
 
 fn trace_superfx_matches_current_frame(name: &'static str) -> bool {
@@ -4852,7 +4873,7 @@ impl SuperFx {
             return;
         };
         if let Some(frame) = trace_superfx_exec_at_frame() {
-            if TRACE_SUPERFX_EXEC_FRAME.load(Ordering::Relaxed) != frame {
+            if current_trace_superfx_frame() != frame {
                 return;
             }
         }

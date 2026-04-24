@@ -450,6 +450,8 @@ pub struct DmaChannelSaveState {
     pub hdma_do_transfer: bool,
     pub hdma_enabled: bool,
     pub hdma_terminated: bool,
+    #[serde(default)]
+    pub hdma_initialized_this_frame: bool,
     pub hdma_latched: [u8; 4],
     pub hdma_latched_len: u8,
     pub hdma_indirect: bool,

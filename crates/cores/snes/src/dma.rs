@@ -20,6 +20,7 @@ pub struct DmaChannel {
     pub hdma_do_transfer: bool, // HDMAがこのラインで転送するか（repeat=0時の「最初の1回」制御）
     pub hdma_enabled: bool,     // HDMAが有効か
     pub hdma_terminated: bool,  // HDMAが終了したか
+    pub hdma_initialized_this_frame: bool,
     // HDMAデータ（リピート用ラッチ）
     pub hdma_latched: [u8; 4],
     pub hdma_latched_len: u8,
@@ -64,6 +65,7 @@ impl DmaChannel {
             hdma_do_transfer: false,
             hdma_enabled: false,
             hdma_terminated: false,
+            hdma_initialized_this_frame: false,
             hdma_latched: [0; 4],
             hdma_latched_len: 0,
             hdma_indirect: false,
@@ -136,6 +138,7 @@ impl DmaChannel {
             hdma_do_transfer: self.hdma_do_transfer,
             hdma_enabled: self.hdma_enabled,
             hdma_terminated: self.hdma_terminated,
+            hdma_initialized_this_frame: self.hdma_initialized_this_frame,
             hdma_latched: self.hdma_latched,
             hdma_latched_len: self.hdma_latched_len,
             hdma_indirect: self.hdma_indirect,
@@ -163,6 +166,7 @@ impl DmaChannel {
         self.hdma_do_transfer = st.hdma_do_transfer;
         self.hdma_enabled = st.hdma_enabled;
         self.hdma_terminated = st.hdma_terminated;
+        self.hdma_initialized_this_frame = st.hdma_initialized_this_frame;
         self.hdma_latched = st.hdma_latched;
         self.hdma_latched_len = st.hdma_latched_len;
         self.hdma_indirect = st.hdma_indirect;
