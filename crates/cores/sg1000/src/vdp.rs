@@ -1,9 +1,10 @@
 use crate::z80::Z80_CLOCK_HZ;
+use sega8_common::tms9918;
 
-pub const FRAME_WIDTH: usize = 256;
-pub const FRAME_HEIGHT: usize = 192;
+pub const FRAME_WIDTH: usize = tms9918::FRAME_WIDTH;
+pub const FRAME_HEIGHT: usize = tms9918::FRAME_HEIGHT;
 
-const VRAM_SIZE: usize = 0x4000;
+const VRAM_SIZE: usize = tms9918::VRAM_SIZE;
 const REG_COUNT: usize = 8;
 const CYCLES_PER_FRAME: u32 = (Z80_CLOCK_HZ / 60) as u32;
 const STATUS_VBLANK: u8 = 0x80;
@@ -100,205 +101,10 @@ impl Vdp {
 
     fn render_frame(&mut self) {
         self.status &= !(STATUS_SPRITE_OVERFLOW | STATUS_SPRITE_COLLISION);
-        let backdrop = self.backdrop_color();
-        self.fill_frame(backdrop);
-
-        if !self.display_enabled() {
-            return;
-        }
-
-        let mode1 = (self.registers[1] & 0x10) != 0;
-        let mode2 = (self.registers[1] & 0x08) != 0;
-        let mode3 = (self.registers[0] & 0x02) != 0;
-        match (mode1, mode2, mode3) {
-            (true, false, false) => self.render_text_mode(),
-            (false, true, false) => self.render_multicolor_mode(),
-            (false, false, true) => self.render_graphics_ii_mode(),
-            _ => self.render_graphics_i_mode(),
-        }
-
-        self.render_sprites();
+        self.status |= tms9918::render_frame(&mut self.frame_buffer, &self.vram, &self.registers);
     }
 
-    fn display_enabled(&self) -> bool {
-        (self.registers[1] & 0x40) != 0
-    }
-
-    fn backdrop_color(&self) -> (u8, u8, u8) {
-        tms_palette_color(self.registers[7] & 0x0F)
-    }
-
-    fn fill_frame(&mut self, color: (u8, u8, u8)) {
-        for pixel in self.frame_buffer.chunks_exact_mut(3) {
-            pixel[0] = color.0;
-            pixel[1] = color.1;
-            pixel[2] = color.2;
-        }
-    }
-
-    fn render_graphics_i_mode(&mut self) {
-        let backdrop = self.backdrop_color();
-        let name_base = ((self.registers[2] as usize) & 0x0F) << 10;
-        let color_base = (self.registers[3] as usize) << 6;
-        let pattern_base = ((self.registers[4] as usize) & 0x07) << 11;
-
-        for y in 0..FRAME_HEIGHT {
-            let tile_y = y / 8;
-            let row = y & 7;
-            for x in 0..FRAME_WIDTH {
-                let tile_x = x / 8;
-                let col = x & 7;
-                let tile = self.vram[(name_base + tile_y * 32 + tile_x) % VRAM_SIZE] as usize;
-                let pattern = self.vram[(pattern_base + tile * 8 + row) % VRAM_SIZE];
-                let color = self.vram[(color_base + tile / 8) % VRAM_SIZE];
-                let fg = color >> 4;
-                let bg = color & 0x0F;
-                let bit = (pattern >> (7 - col)) & 1;
-                let color_index = if bit != 0 { fg } else { bg };
-                self.set_pixel(x, y, tms_color_to_rgb(color_index, backdrop));
-            }
-        }
-    }
-
-    fn render_graphics_ii_mode(&mut self) {
-        let backdrop = self.backdrop_color();
-        let name_base = ((self.registers[2] as usize) & 0x0F) << 10;
-        let color_base = ((self.registers[3] as usize) & 0x80) << 6;
-        let pattern_base = ((self.registers[4] as usize) & 0x04) << 11;
-
-        for y in 0..FRAME_HEIGHT {
-            let page = y / 64;
-            let tile_y = y / 8;
-            let row = y & 7;
-            for x in 0..FRAME_WIDTH {
-                let tile_x = x / 8;
-                let col = x & 7;
-                let name = self.vram[(name_base + tile_y * 32 + tile_x) % VRAM_SIZE] as usize;
-                let tile = page * 256 + name;
-                let pattern = self.vram[(pattern_base + tile * 8 + row) % VRAM_SIZE];
-                let color = self.vram[(color_base + tile * 8 + row) % VRAM_SIZE];
-                let fg = color >> 4;
-                let bg = color & 0x0F;
-                let bit = (pattern >> (7 - col)) & 1;
-                let color_index = if bit != 0 { fg } else { bg };
-                self.set_pixel(x, y, tms_color_to_rgb(color_index, backdrop));
-            }
-        }
-    }
-
-    fn render_text_mode(&mut self) {
-        let backdrop = self.backdrop_color();
-        let name_base = ((self.registers[2] as usize) & 0x0F) << 10;
-        let pattern_base = ((self.registers[4] as usize) & 0x07) << 11;
-        let fg = (self.registers[7] >> 4) & 0x0F;
-        let bg = self.registers[7] & 0x0F;
-        let x_offset = 8;
-
-        for y in 0..FRAME_HEIGHT {
-            let tile_y = y / 8;
-            let row = y & 7;
-            for cell_x in 0..40 {
-                let tile = self.vram[(name_base + tile_y * 40 + cell_x) % VRAM_SIZE] as usize;
-                let pattern = self.vram[(pattern_base + tile * 8 + row) % VRAM_SIZE];
-                for col in 0..6 {
-                    let bit = (pattern >> (7 - col)) & 1;
-                    let color_index = if bit != 0 { fg } else { bg };
-                    self.set_pixel(
-                        x_offset + cell_x * 6 + col,
-                        y,
-                        tms_color_to_rgb(color_index, backdrop),
-                    );
-                }
-            }
-        }
-    }
-
-    fn render_multicolor_mode(&mut self) {
-        let backdrop = self.backdrop_color();
-        let name_base = ((self.registers[2] as usize) & 0x0F) << 10;
-        let pattern_base = ((self.registers[4] as usize) & 0x07) << 11;
-
-        for y in 0..FRAME_HEIGHT {
-            let tile_y = y / 8;
-            let block_row = (y & 7) / 4;
-            for x in 0..FRAME_WIDTH {
-                let tile_x = x / 8;
-                let block_col = (x & 7) / 4;
-                let tile = self.vram[(name_base + tile_y * 32 + tile_x) % VRAM_SIZE] as usize;
-                let color_byte =
-                    self.vram[(pattern_base + tile * 8 + block_row * 2 + block_col) % VRAM_SIZE];
-                let color_index = if block_col == 0 {
-                    color_byte >> 4
-                } else {
-                    color_byte & 0x0F
-                };
-                self.set_pixel(x, y, tms_color_to_rgb(color_index, backdrop));
-            }
-        }
-    }
-
-    fn render_sprites(&mut self) {
-        let backdrop = self.backdrop_color();
-        let sat_base = ((self.registers[5] as usize) & 0x7F) << 7;
-        let pattern_base = ((self.registers[6] as usize) & 0x07) << 11;
-        let sprites_16x16 = (self.registers[1] & 0x02) != 0;
-        let magnify = (self.registers[1] & 0x01) != 0;
-        let base_size = if sprites_16x16 { 16 } else { 8 };
-        let drawn_size = if magnify { base_size * 2 } else { base_size };
-        let mut occupied = vec![false; FRAME_WIDTH * FRAME_HEIGHT];
-
-        for i in 0..32 {
-            let addr = sat_base + i * 4;
-            let y_byte = self.vram[addr % VRAM_SIZE];
-            if y_byte == 0xD0 {
-                break;
-            }
-            let sprite_y = y_byte.wrapping_add(1) as i16;
-            let mut sprite_x = self.vram[(addr + 1) % VRAM_SIZE] as i16;
-            let mut pattern = self.vram[(addr + 2) % VRAM_SIZE] as usize;
-            let color = self.vram[(addr + 3) % VRAM_SIZE];
-            if color & 0x80 != 0 {
-                sprite_x -= 32;
-            }
-            let color_index = color & 0x0F;
-            if color_index == 0 {
-                continue;
-            }
-            if sprites_16x16 {
-                pattern &= !0x03;
-            }
-
-            for sy in 0..drawn_size {
-                let src_y = if magnify { sy / 2 } else { sy };
-                let dy = sprite_y + sy as i16;
-                if !(0..FRAME_HEIGHT as i16).contains(&dy) {
-                    continue;
-                }
-                for sx in 0..drawn_size {
-                    let src_x = if magnify { sx / 2 } else { sx };
-                    let dx = sprite_x + sx as i16;
-                    if !(0..FRAME_WIDTH as i16).contains(&dx) {
-                        continue;
-                    }
-                    if !self.sprite_pattern_bit(pattern_base, pattern, base_size, src_x, src_y) {
-                        continue;
-                    }
-                    let index = dy as usize * FRAME_WIDTH + dx as usize;
-                    if occupied[index] {
-                        self.status |= STATUS_SPRITE_COLLISION;
-                        continue;
-                    }
-                    self.set_pixel(
-                        dx as usize,
-                        dy as usize,
-                        tms_color_to_rgb(color_index, backdrop),
-                    );
-                    occupied[index] = true;
-                }
-            }
-        }
-    }
-
+    #[cfg(test)]
     fn sprite_pattern_bit(
         &self,
         pattern_base: usize,
@@ -307,27 +113,7 @@ impl Vdp {
         x: usize,
         y: usize,
     ) -> bool {
-        let tile_col = x / 8;
-        let tile_row = y / 8;
-        let tile = if sprite_size == 16 {
-            pattern + tile_col * 2 + tile_row
-        } else {
-            pattern
-        };
-        let row = y & 7;
-        let col = x & 7;
-        let byte = self.vram[(pattern_base + tile * 8 + row) % VRAM_SIZE];
-        ((byte >> (7 - col)) & 1) != 0
-    }
-
-    fn set_pixel(&mut self, x: usize, y: usize, color: (u8, u8, u8)) {
-        if x >= FRAME_WIDTH || y >= FRAME_HEIGHT {
-            return;
-        }
-        let offset = (y * FRAME_WIDTH + x) * 3;
-        self.frame_buffer[offset] = color.0;
-        self.frame_buffer[offset + 1] = color.1;
-        self.frame_buffer[offset + 2] = color.2;
+        tms9918::sprite_pattern_bit(&self.vram, pattern_base, pattern, sprite_size, x, y)
     }
 }
 
@@ -349,35 +135,6 @@ impl Default for Vdp {
     }
 }
 
-fn tms_color_to_rgb(index: u8, backdrop: (u8, u8, u8)) -> (u8, u8, u8) {
-    if index == 0 {
-        return backdrop;
-    }
-    tms_palette_color(index)
-}
-
-fn tms_palette_color(index: u8) -> (u8, u8, u8) {
-    const PALETTE: [(u8, u8, u8); 16] = [
-        (0, 0, 0),
-        (0, 0, 0),
-        (33, 200, 66),
-        (94, 220, 120),
-        (84, 85, 237),
-        (125, 118, 252),
-        (212, 82, 77),
-        (66, 235, 245),
-        (252, 85, 84),
-        (255, 121, 120),
-        (212, 193, 84),
-        (230, 206, 128),
-        (33, 176, 59),
-        (201, 91, 186),
-        (204, 204, 204),
-        (255, 255, 255),
-    ];
-    PALETTE[index as usize & 0x0F]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,7 +154,7 @@ mod tests {
 
         vdp.render_frame();
 
-        let backdrop = tms_palette_color(0x0C);
+        let backdrop = tms9918::tms_palette_color(0x0C);
         assert_eq!(
             &vdp.frame_buffer()[0..3],
             &[backdrop.0, backdrop.1, backdrop.2]

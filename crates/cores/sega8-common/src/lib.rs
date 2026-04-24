@@ -6,4 +6,5 @@ pub mod audio;
 pub mod bus;
 pub mod emulator;
 pub mod input;
+pub mod tms9918;
 pub mod z80;
