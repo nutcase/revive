@@ -3,6 +3,7 @@ members = [
     "crates/cores/gameboy/core",
     "crates/cores/gameboy/gb",
     "crates/cores/gameboy/gba",
+    "crates/cores/mastersystem",
     "crates/cores/megadrive",
     "crates/cores/nes",
     "crates/cores/pce",
@@ -28,6 +29,9 @@ opt-level = 3
 opt-level = 3
 
 [profile.dev.package.megadrive-core]
+opt-level = 3
+
+[profile.dev.package.mastersystem-core]
 opt-level = 3
 
 [profile.dev.package.nes-emulator]

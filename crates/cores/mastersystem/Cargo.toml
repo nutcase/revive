@@ -1,0 +1,11 @@
+[package]
+name = "mastersystem-core"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "mastersystem_core"
+path = "src/lib.rs"
+
+[dependencies]
+bincode = { version = "2", features = ["derive"] }

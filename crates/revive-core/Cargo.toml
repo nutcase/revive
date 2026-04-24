@@ -17,6 +17,7 @@ gba-runtime-debug-trace = ["emulator-gba/runtime-debug-trace"]
 emulator-core = { path = "../cores/gameboy/core" }
 emulator-gb = { path = "../cores/gameboy/gb" }
 emulator-gba = { path = "../cores/gameboy/gba" }
+mastersystem-core = { path = "../cores/mastersystem" }
 megadrive-core = { path = "../cores/megadrive" }
 nes-emulator = { path = "../cores/nes" }
 pce = { package = "pce-core", path = "../cores/pce" }

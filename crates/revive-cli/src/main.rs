@@ -217,15 +217,15 @@ where
 fn print_usage() {
     println!("Usage:");
     println!(
-        "  revive [rom] [--system nes|snes|sg1000|megadrive|pce|gb|gbc|gba] [--cheats file.json] [--no-audio]"
+        "  revive [rom] [--system nes|snes|sg1000|sms|megadrive|pce|gb|gbc|gba] [--cheats file.json] [--no-audio]"
     );
     println!(
-        "  revive run [rom] [--system nes|snes|sg1000|megadrive|pce|gb|gbc|gba] [--cheats file.json] [--no-audio]"
+        "  revive run [rom] [--system nes|snes|sg1000|sms|megadrive|pce|gb|gbc|gba] [--cheats file.json] [--no-audio]"
     );
     println!("  revive --select");
     println!();
     println!("If no ROM path is provided, a local file selection dialog opens.");
-    println!("Supported ROM extensions: .nes, .sfc, .smc, .sg, .sg1000, .md, .gen, .pce, .gb, .gbc, .gba, .bin");
+    println!("Supported ROM extensions: .nes, .sfc, .smc, .sg, .sg1000, .sms, .mk3, .md, .gen, .pce, .gb, .gbc, .gba, .bin");
 }
 
 fn resolve_rom_path(options: &Options) -> Option<PathBuf> {
@@ -242,12 +242,14 @@ fn select_rom_path() -> Option<PathBuf> {
         .add_filter(
             "ROM files",
             &[
-                "nes", "sfc", "smc", "sg", "sg1000", "md", "gen", "pce", "gb", "gbc", "gba", "bin",
+                "nes", "sfc", "smc", "sg", "sg1000", "sms", "mk3", "md", "gen", "pce", "gb", "gbc",
+                "gba", "bin",
             ],
         )
         .add_filter("NES", &["nes"])
         .add_filter("SNES", &["sfc", "smc"])
         .add_filter("SG-1000", &["sg", "sg1000"])
+        .add_filter("Master System", &["sms", "mk3"])
         .add_filter("Mega Drive", &["md", "gen", "bin"])
         .add_filter("PC Engine", &["pce"])
         .add_filter("Game Boy", &["gb", "gbc"])
@@ -280,6 +282,7 @@ fn system_dir(system: SystemKind) -> &'static str {
         SystemKind::Nes => "nes",
         SystemKind::Snes => "snes",
         SystemKind::Sg1000 => "sg1000",
+        SystemKind::MasterSystem => "mastersystem",
         SystemKind::MegaDrive => "megadrive",
         SystemKind::Pce => "pce",
         SystemKind::GameBoy => "gb",
@@ -812,6 +815,7 @@ fn keycode_button(system: SystemKind, key: Keycode) -> Option<VirtualButton> {
         SystemKind::Nes => nes_keycode_button(key),
         SystemKind::Snes => snes_keycode_button(key),
         SystemKind::Sg1000 => sg1000_keycode_button(key),
+        SystemKind::MasterSystem => mastersystem_keycode_button(key),
         SystemKind::MegaDrive => megadrive_keycode_button(key),
         SystemKind::Pce => pce_keycode_button(key),
         SystemKind::GameBoy | SystemKind::GameBoyColor => gameboy_keycode_button(key),
@@ -881,6 +885,10 @@ fn sg1000_keycode_button(key: Keycode) -> Option<VirtualButton> {
     }
 }
 
+fn mastersystem_keycode_button(key: Keycode) -> Option<VirtualButton> {
+    sg1000_keycode_button(key)
+}
+
 fn pce_keycode_button(key: Keycode) -> Option<VirtualButton> {
     match key {
         Keycode::Up => Some(VirtualButton::Up),
@@ -922,6 +930,7 @@ fn button_pressed(system: SystemKind, keyboard: &KeyboardState<'_>, button: Virt
         SystemKind::Nes => nes_button_pressed(keyboard, button),
         SystemKind::Snes => snes_button_pressed(keyboard, button),
         SystemKind::Sg1000 => sg1000_button_pressed(keyboard, button),
+        SystemKind::MasterSystem => mastersystem_button_pressed(keyboard, button),
         SystemKind::MegaDrive => megadrive_button_pressed(keyboard, button),
         SystemKind::Pce => pce_button_pressed(keyboard, button),
         SystemKind::GameBoy | SystemKind::GameBoyColor => gameboy_button_pressed(keyboard, button),
@@ -995,6 +1004,10 @@ fn sg1000_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) ->
         VirtualButton::B => scancode_down(keyboard, &[Scancode::X, Scancode::K]),
         _ => false,
     }
+}
+
+fn mastersystem_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
+    sg1000_button_pressed(keyboard, button)
 }
 
 fn pce_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
@@ -1096,6 +1109,7 @@ impl FrameClock {
             SystemKind::Nes => 60.0988,
             SystemKind::Snes => 60.0988,
             SystemKind::Sg1000 => 60.0,
+            SystemKind::MasterSystem => 59.9227,
             SystemKind::MegaDrive => 59.9227,
             SystemKind::Pce => 60.0,
             SystemKind::GameBoy | SystemKind::GameBoyColor | SystemKind::GameBoyAdvance => 59.7275,

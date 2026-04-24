@@ -11,6 +11,7 @@ differences between the underlying emulator cores.
 - NES / Famicom
 - SNES / Super Famicom
 - SG-1000
+- Master System / Mark III
 - Mega Drive / Genesis
 - PC Engine / TurboGrafx-16
 - Game Boy
@@ -26,6 +27,7 @@ Sibling repositories are not required at build time.
 crates/cores/nes
 crates/cores/snes
 crates/cores/sg1000
+crates/cores/mastersystem
 crates/cores/megadrive
 crates/cores/pce
 crates/cores/gameboy/core
@@ -65,6 +67,7 @@ To select a system explicitly:
 cargo run -- run <rom> --system nes
 cargo run -- run <rom> --system snes
 cargo run -- run <rom> --system sg1000
+cargo run -- run <rom> --system sms
 cargo run -- run <rom> --system megadrive
 cargo run -- run <rom> --system pce
 cargo run -- run <rom> --system gb
@@ -119,6 +122,7 @@ Revive detects systems from file extensions.
 - `.nes`: NES
 - `.sfc`, `.smc`: SNES
 - `.sg`, `.sg1000`: SG-1000
+- `.sms`, `.mk3`: Master System
 - `.md`, `.gen`: Mega Drive
 - `.pce`: PC Engine
 - `.gb`: Game Boy
@@ -160,6 +164,12 @@ SNES:
 - `Backspace` / Shift: Select
 
 SG-1000:
+
+- Arrow keys: D-pad
+- `Z` / `J`: Button 1
+- `X` / `K`: Button 2
+
+Master System:
 
 - Arrow keys: D-pad
 - `Z` / `J`: Button 1
@@ -258,6 +268,7 @@ Main region IDs:
 - NES: `cpu_ram`, `prg_ram`
 - SNES: `wram`, `sram`
 - SG-1000: `wram`, `vram`
+- Master System: `wram`, `cart_ram`, `vram`
 - Mega Drive: `wram`
 - PC Engine: `wram`, `cart_ram`, `bram`
 - Game Boy / Game Boy Color: `cart_ram`
@@ -278,6 +289,7 @@ Examples:
 ```text
 states/snes/Super F1 Circus Gaiden (Japan)/slot1.sns
 states/sg1000/Champion Boxing/slot1.sgs
+states/mastersystem/Alex Kidd in Miracle World/slot1.smsst
 states/megadrive/Sonic The Hedgehog/slot1.mdst
 states/nes/Super Mario Bros/slot1.sav
 states/pce/Adventure Island/slot1.pcst
@@ -317,8 +329,9 @@ frontend that selects the right core for one ROM and presents a common UI.
 ### `revive-core`
 
 `revive-core` hides emulator-specific differences behind adapters. The
-`CoreInstance` enum wraps NES, SNES, SG-1000, Mega Drive, PC Engine, Game Boy,
-and GBA implementations, and exposes only the common operations to the CLI.
+`CoreInstance` enum wraps NES, SNES, SG-1000, Master System, Mega Drive, PC
+Engine, Game Boy, and GBA implementations, and exposes only the common
+operations to the CLI.
 
 - `load_rom`
 - `step_frame`
@@ -385,6 +398,7 @@ Examples:
 cargo test -p nes-emulator save_state
 cargo test -p snes-core
 cargo test -p sg1000-core
+cargo test -p mastersystem-core
 cargo test -p megadrive-core
 cargo test -p pce-core
 cargo test -p emulator-gb

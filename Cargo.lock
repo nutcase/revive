@@ -1151,6 +1151,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mastersystem-core"
+version = "0.1.0"
+dependencies = [
+ "bincode 2.0.1",
+]
+
+[[package]]
 name = "megadrive-core"
 version = "0.1.0"
 dependencies = [
@@ -1655,6 +1662,7 @@ dependencies = [
  "emulator-core",
  "emulator-gb",
  "emulator-gba",
+ "mastersystem-core",
  "megadrive-core",
  "nes-emulator",
  "pce-core",
