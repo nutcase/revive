@@ -1,6 +1,7 @@
 use crate::audio::Audio;
 use crate::input::{Button, Input};
 use crate::vdp::Vdp;
+use sega8_common::bus::{InputDevice, Sega8BusDevices, VdpDevice};
 
 const WORK_RAM_SIZE: usize = 0x400;
 
@@ -25,8 +26,7 @@ impl Bus {
     }
 
     pub fn step(&mut self, cycles: u32) -> bool {
-        self.audio.step(cycles);
-        self.vdp.step(cycles)
+        <Self as Sega8BusDevices>::step_devices(self, cycles)
     }
 
     pub fn read_memory(&self, addr: u16) -> u8 {
@@ -52,15 +52,15 @@ impl Bus {
         match port {
             0xBE => self.vdp.read_data_port(),
             0xBF => self.vdp.read_status_port(),
-            0xDC | 0xC0 => self.input.read_port1(),
-            0xDD | 0xC1 => self.input.read_port2(),
+            0xDC | 0xC0 => <Self as Sega8BusDevices>::read_input_port1(self),
+            0xDD | 0xC1 => <Self as Sega8BusDevices>::read_input_port2(self),
             _ => 0xFF,
         }
     }
 
     pub fn write_port(&mut self, port: u8, value: u8) {
         match port {
-            0x7F => self.audio.write_psg(value),
+            0x7F => <Self as Sega8BusDevices>::write_psg(self, value),
             0xBE => self.vdp.write_data_port(value),
             0xBF => self.vdp.write_control_port(value),
             _ => {}
@@ -68,7 +68,7 @@ impl Bus {
     }
 
     pub fn frame_buffer(&self) -> &[u8] {
-        self.vdp.frame_buffer()
+        <Self as Sega8BusDevices>::device_frame_buffer(self)
     }
 
     pub fn work_ram(&self) -> &[u8] {
@@ -80,39 +80,109 @@ impl Bus {
     }
 
     pub fn vram(&self) -> &[u8] {
-        self.vdp.vram()
+        <Self as Sega8BusDevices>::device_vram(self)
     }
 
     pub fn vram_mut(&mut self) -> &mut [u8] {
-        self.vdp.vram_mut()
+        <Self as Sega8BusDevices>::device_vram_mut(self)
     }
 
     pub fn set_button_pressed(&mut self, player: u8, button: Button, pressed: bool) {
-        self.input.set_button_pressed(player, button, pressed);
+        <Self as Sega8BusDevices>::set_device_button_pressed(self, player, button, pressed);
     }
 
     pub fn pending_audio_samples(&self) -> usize {
-        self.audio.pending_samples()
+        <Self as Sega8BusDevices>::pending_audio_samples(self)
     }
 
     pub fn drain_audio_samples(&mut self, max_samples: usize) -> Vec<i16> {
-        self.audio.drain_samples(max_samples)
+        <Self as Sega8BusDevices>::drain_audio_samples(self, max_samples)
     }
 
     pub fn set_audio_output_sample_rate_hz(&mut self, hz: u32) {
-        self.audio.set_output_sample_rate_hz(hz);
+        <Self as Sega8BusDevices>::set_audio_output_sample_rate_hz(self, hz);
     }
 
     pub fn audio_output_channels(&self) -> u8 {
-        self.audio.output_channels()
+        <Self as Sega8BusDevices>::audio_output_channels(self)
     }
 
     pub fn vdp_interrupt_enabled(&self) -> bool {
-        self.vdp.interrupt_enabled()
+        <Self as Sega8BusDevices>::device_vdp_interrupt_enabled(self)
     }
 
     pub fn frame_count(&self) -> u64 {
-        self.vdp.frame_count()
+        <Self as Sega8BusDevices>::device_frame_count(self)
+    }
+}
+
+impl Sega8BusDevices for Bus {
+    type Button = Button;
+    type Input = Input;
+    type Vdp = Vdp;
+
+    fn audio(&self) -> &Audio {
+        &self.audio
+    }
+
+    fn audio_mut(&mut self) -> &mut Audio {
+        &mut self.audio
+    }
+
+    fn input(&self) -> &Self::Input {
+        &self.input
+    }
+
+    fn input_mut(&mut self) -> &mut Self::Input {
+        &mut self.input
+    }
+
+    fn vdp(&self) -> &Self::Vdp {
+        &self.vdp
+    }
+
+    fn vdp_mut(&mut self) -> &mut Self::Vdp {
+        &mut self.vdp
+    }
+}
+
+impl InputDevice<Button> for Input {
+    fn set_button_pressed(&mut self, player: u8, button: Button, pressed: bool) {
+        Input::set_button_pressed(self, player, button, pressed);
+    }
+
+    fn read_port1(&self) -> u8 {
+        Input::read_port1(self)
+    }
+
+    fn read_port2(&self) -> u8 {
+        Input::read_port2(self)
+    }
+}
+
+impl VdpDevice for Vdp {
+    fn step(&mut self, cycles: u32) -> bool {
+        Vdp::step(self, cycles)
+    }
+
+    fn frame_buffer(&self) -> &[u8] {
+        Vdp::frame_buffer(self)
+    }
+
+    fn vram(&self) -> &[u8] {
+        Vdp::vram(self)
+    }
+
+    fn vram_mut(&mut self) -> &mut [u8] {
+        Vdp::vram_mut(self)
+    }
+
+    fn interrupt_enabled(&self) -> bool {
+        Vdp::interrupt_enabled(self)
+    }
+
+    fn frame_count(&self) -> u64 {
+        Vdp::frame_count(self)
     }
 }
 

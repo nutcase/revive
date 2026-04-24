@@ -3,5 +3,7 @@
 mod z80_ops;
 
 pub mod audio;
+pub mod bus;
 pub mod emulator;
+pub mod input;
 pub mod z80;

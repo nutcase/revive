@@ -1,35 +1,6 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, bincode::Encode, bincode::Decode)]
-pub enum Button {
-    Up,
-    Down,
-    Left,
-    Right,
-    Button1,
-    Button2,
-}
+pub use sega8_common::input::Button;
 
-#[derive(Debug, Clone, Copy, Default, bincode::Encode, bincode::Decode)]
-struct Controller {
-    up: bool,
-    down: bool,
-    left: bool,
-    right: bool,
-    button1: bool,
-    button2: bool,
-}
-
-impl Controller {
-    fn set(&mut self, button: Button, pressed: bool) {
-        match button {
-            Button::Up => self.up = pressed,
-            Button::Down => self.down = pressed,
-            Button::Left => self.left = pressed,
-            Button::Right => self.right = pressed,
-            Button::Button1 => self.button1 = pressed,
-            Button::Button2 => self.button2 = pressed,
-        }
-    }
-}
+use sega8_common::input::{Controller, active_low};
 
 #[derive(Debug, Clone, bincode::Encode, bincode::Decode)]
 pub struct Input {
@@ -53,22 +24,15 @@ impl Input {
     pub fn read_port1(&self) -> u8 {
         let p1 = self.pads[0];
         let p2 = self.pads[1];
-        active_low(p1.up)
-            | (active_low(p1.down) << 1)
-            | (active_low(p1.left) << 2)
-            | (active_low(p1.right) << 3)
-            | (active_low(p1.button1) << 4)
-            | (active_low(p1.button2) << 5)
-            | (active_low(p2.up) << 6)
-            | (active_low(p2.down) << 7)
+        p1.active_low_bits() | (active_low(p2.up()) << 6) | (active_low(p2.down()) << 7)
     }
 
     pub fn read_port2(&self) -> u8 {
         let p2 = self.pads[1];
-        active_low(p2.left)
-            | (active_low(p2.right) << 1)
-            | (active_low(p2.button1) << 2)
-            | (active_low(p2.button2) << 3)
+        active_low(p2.left())
+            | (active_low(p2.right()) << 1)
+            | (active_low(p2.button1()) << 2)
+            | (active_low(p2.button2()) << 3)
             | 0xF0
     }
 }
@@ -79,10 +43,6 @@ impl Default for Input {
             pads: [Controller::default(), Controller::default()],
         }
     }
-}
-
-fn active_low(pressed: bool) -> u8 {
-    if pressed { 0 } else { 1 }
 }
 
 #[cfg(test)]
