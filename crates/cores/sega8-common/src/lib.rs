@@ -3,4 +3,5 @@
 mod z80_ops;
 
 pub mod audio;
+pub mod emulator;
 pub mod z80;

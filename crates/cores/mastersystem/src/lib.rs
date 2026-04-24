@@ -8,11 +8,12 @@ use std::path::Path;
 
 use bus::Bus;
 pub use input::Button;
+use sega8_common::emulator;
+pub use sega8_common::emulator::StepResult;
 pub use vdp::{FRAME_HEIGHT, FRAME_WIDTH};
 use z80::Z80;
 
 const STATE_MAGIC: [u8; 4] = *b"SMS1";
-const STEP_CYCLES: u32 = 64;
 
 #[derive(Debug, Clone, bincode::Encode, bincode::Decode)]
 pub struct Emulator {
@@ -25,27 +26,14 @@ impl Emulator {
         if rom.is_empty() {
             return Err("Master System ROM is empty".to_string());
         }
-        let mut cpu = Z80::new();
-        cpu.write_reset_byte(0x01);
         Ok(Self {
-            cpu,
+            cpu: emulator::initialized_cpu(),
             bus: Bus::new(rom),
         })
     }
 
     pub fn step(&mut self) -> StepResult {
-        self.cpu.step(STEP_CYCLES, &mut self.bus);
-        let frame_ready = self.bus.step(STEP_CYCLES);
-        if frame_ready && self.bus.vdp_interrupt_enabled() {
-            self.cpu.request_interrupt();
-        }
-        StepResult {
-            cpu_cycles: STEP_CYCLES,
-            frame_ready,
-            pc: self.cpu.pc(),
-            total_cycles: self.cpu.cycles(),
-            frame_count: self.bus.frame_count(),
-        }
+        emulator::step_frame(&mut self.cpu, &mut self.bus)
     }
 
     pub fn frame_buffer(&self) -> &[u8] {
@@ -105,46 +93,22 @@ impl Emulator {
     }
 
     pub fn save_state_bytes(&self) -> Result<Vec<u8>, String> {
-        let mut bytes = Vec::with_capacity(16 * 1024);
-        bytes.extend_from_slice(&STATE_MAGIC);
-        let encoded =
-            bincode::encode_to_vec(self, bincode::config::standard()).map_err(|e| e.to_string())?;
-        bytes.extend_from_slice(&encoded);
-        Ok(bytes)
+        emulator::save_state_bytes(&STATE_MAGIC, self)
     }
 
     pub fn save_state_to_file(&self, path: &Path) -> Result<(), String> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        let bytes = self.save_state_bytes()?;
-        std::fs::write(path, bytes).map_err(|e| e.to_string())
+        emulator::save_state_to_file(&STATE_MAGIC, self, path)
     }
 
     pub fn load_state_bytes(&mut self, bytes: &[u8]) -> Result<(), String> {
-        if bytes.len() < STATE_MAGIC.len() || bytes[..STATE_MAGIC.len()] != STATE_MAGIC {
-            return Err("invalid Master System state file header".to_string());
-        }
-        let (state, _): (Emulator, usize) =
-            bincode::decode_from_slice(&bytes[STATE_MAGIC.len()..], bincode::config::standard())
-                .map_err(|e| e.to_string())?;
-        *self = state;
+        *self = emulator::load_state_bytes(&STATE_MAGIC, "Master System", bytes)?;
         Ok(())
     }
 
     pub fn load_state_from_file(&mut self, path: &Path) -> Result<(), String> {
-        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-        self.load_state_bytes(&bytes)
+        *self = emulator::load_state_from_file(&STATE_MAGIC, "Master System", path)?;
+        Ok(())
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, bincode::Encode, bincode::Decode)]
-pub struct StepResult {
-    pub cpu_cycles: u32,
-    pub frame_ready: bool,
-    pub pc: u16,
-    pub total_cycles: u64,
-    pub frame_count: u64,
 }
 
 #[cfg(test)]

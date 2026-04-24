@@ -133,3 +133,17 @@ impl sega8_common::z80::BusIo for Bus {
         Bus::write_port(self, port, value);
     }
 }
+
+impl sega8_common::emulator::FrameBus for Bus {
+    fn step_components(&mut self, cycles: u32) -> bool {
+        Bus::step(self, cycles)
+    }
+
+    fn vdp_interrupt_enabled(&self) -> bool {
+        Bus::vdp_interrupt_enabled(self)
+    }
+
+    fn frame_count(&self) -> u64 {
+        Bus::frame_count(self)
+    }
+}
