@@ -40,9 +40,38 @@ fn env_u32_opt(key: &str) -> Option<u32> {
     std::env::var(key).ok().and_then(|v| v.parse::<u32>().ok())
 }
 
+#[cfg(not(feature = "runtime-debug-flags"))]
+#[inline(always)]
+fn env_u64_opt(_key: &str) -> Option<u64> {
+    None
+}
+
+#[cfg(feature = "runtime-debug-flags")]
+fn env_u64_opt(key: &str) -> Option<u64> {
+    std::env::var(key).ok().and_then(|v| {
+        let trimmed = v.trim();
+        trimmed.parse::<u64>().ok().filter(|&value| value > 0)
+    })
+}
+
+pub(super) fn cpu_test_auto_exit_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("CPU_TEST_MODE").is_some())
+}
+
 pub(super) fn trace_cpu_sfx_ram_callers_enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| env_present("TRACE_CPU_SFX_RAM_CALLERS"))
+}
+
+pub(super) fn trace_cpu_slow_read_ms() -> Option<u64> {
+    static VAL: OnceLock<Option<u64>> = OnceLock::new();
+    *VAL.get_or_init(|| env_u64_opt("TRACE_CPU_SLOW_READ_MS"))
+}
+
+pub(super) fn trace_nmi_suppress_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| env_present("TRACE_NMI_SUPPRESS"))
 }
 
 pub(super) fn trace_starfox_slow_profile_enabled() -> bool {
