@@ -2,13 +2,16 @@ use std::error::Error;
 use std::io;
 use std::path::{Path, PathBuf};
 
+mod audio;
 mod cheat_panel;
 mod frame_clock;
 mod gl_game;
 mod hud;
 mod input;
 mod state;
+mod window;
 
+use audio::{feed_audio, open_audio_queue};
 use cheat_panel::{CheatPanel, MemorySnapshot};
 use egui_sdl2_gl::gl;
 use egui_sdl2_gl::{DpiScaling, ShaderVersion};
@@ -20,11 +23,11 @@ use input::{
 };
 use revive_cheat::CheatManager;
 use revive_core::{CoreInstance, SystemKind, ROM_EXTENSIONS};
-use sdl2::audio::{AudioQueue, AudioSpecDesired};
 use sdl2::event::{Event, WindowEvent};
 use sdl2::keyboard::Keycode;
-use sdl2::video::{GLProfile, SwapInterval, Window};
+use sdl2::video::{GLProfile, SwapInterval};
 use state::{handle_state_key, state_key_help};
+use window::bring_window_to_front;
 
 const DEFAULT_SCALE: u32 = 3;
 const PANEL_WIDTH_DEFAULT: f32 = 420.0;
@@ -548,64 +551,6 @@ fn run_sdl_loop(
     Ok(())
 }
 
-fn bring_window_to_front(window: &mut Window) {
-    window.show();
-    window.raise();
-    platform_bring_window_to_front(window);
-}
-
-#[cfg(target_os = "macos")]
-fn platform_bring_window_to_front(window: &Window) {
-    macos_frontmost::activate_window(window);
-}
-
-#[cfg(not(target_os = "macos"))]
-fn platform_bring_window_to_front(_window: &Window) {}
-
-fn open_audio_queue(
-    sdl: &sdl2::Sdl,
-    core: &mut CoreInstance,
-) -> Result<AudioQueue<i16>, Box<dyn Error>> {
-    let audio = sdl.audio().map_err(sdl_error)?;
-    let spec = core.audio_spec();
-    let desired = AudioSpecDesired {
-        freq: Some(spec.sample_rate_hz as i32),
-        channels: Some(spec.channels),
-        samples: Some(1024),
-    };
-    let queue = audio
-        .open_queue::<i16, _>(None, &desired)
-        .map_err(|err| io::Error::other(err.to_string()))?;
-    let obtained = queue.spec();
-    core.configure_audio_output(obtained.freq.max(8_000) as u32);
-    queue.resume();
-    println!(
-        "Audio       : {} Hz, {} ch",
-        obtained.freq, obtained.channels
-    );
-    Ok(queue)
-}
-
-fn feed_audio(
-    queue: &mut AudioQueue<i16>,
-    core: &mut CoreInstance,
-    scratch: &mut Vec<i16>,
-) -> Result<(), Box<dyn Error>> {
-    let spec = queue.spec();
-    let channels = usize::from(spec.channels.max(1));
-    let queued_i16 = queue.size() as usize / std::mem::size_of::<i16>();
-    let queued_frames = queued_i16 / channels;
-    let target_frames = ((spec.freq.max(8_000) as usize) / 30).clamp(512, 2048);
-
-    core.drain_audio_i16(scratch);
-    if queued_frames < target_frames && !scratch.is_empty() {
-        queue
-            .queue_audio(scratch)
-            .map_err(|err| io::Error::other(err.to_string()))?;
-    }
-    Ok(())
-}
-
 fn apply_cheats(core: &mut CoreInstance, cheats: &CheatManager) {
     for entry in cheats.enabled_entries() {
         core.write_memory_byte(&entry.region, entry.offset as usize, entry.value);
@@ -636,156 +581,5 @@ fn filter_event_for_ascii_text_input(event: &Event) -> Option<Event> {
             }
         }
         _ => Some(event.clone()),
-    }
-}
-
-#[cfg(target_os = "macos")]
-mod macos_frontmost {
-    use std::ffi::{c_char, c_void, CString};
-
-    use sdl2::video::Window;
-
-    const SDL_SYSWM_COCOA: u32 = 4;
-    const NS_APPLICATION_ACTIVATION_POLICY_REGULAR: isize = 0;
-    const NS_APPLICATION_ACTIVATE_ALL_WINDOWS: usize = 1 << 0;
-    const NS_APPLICATION_ACTIVATE_IGNORING_OTHER_APPS: usize = 1 << 1;
-
-    #[repr(C)]
-    union SdlSysWmInfoData {
-        cocoa: CocoaInfo,
-        dummy: [u8; 64],
-        _align: [u64; 8],
-    }
-
-    #[repr(C)]
-    #[derive(Copy, Clone)]
-    struct CocoaInfo {
-        window: *mut c_void,
-    }
-
-    #[repr(C)]
-    struct SdlSysWmInfo {
-        version: sdl2::sys::SDL_version,
-        subsystem: u32,
-        info: SdlSysWmInfoData,
-    }
-
-    #[link(name = "objc")]
-    unsafe extern "C" {
-        fn SDL_GetWindowWMInfo(
-            window: *mut sdl2::sys::SDL_Window,
-            info: *mut SdlSysWmInfo,
-        ) -> sdl2::sys::SDL_bool;
-
-        fn objc_getClass(name: *const c_char) -> *mut c_void;
-        fn sel_registerName(name: *const c_char) -> *mut c_void;
-        fn objc_msgSend();
-    }
-
-    pub fn activate_window(window: &Window) {
-        let Some(ns_window) = ns_window(window) else {
-            return;
-        };
-        unsafe {
-            activate_application();
-            send_void_no_args(ns_window, sel("makeMainWindow"));
-            send_void_no_args(ns_window, sel("makeKeyWindow"));
-            send_void(
-                ns_window,
-                sel("makeKeyAndOrderFront:"),
-                std::ptr::null_mut(),
-            );
-            send_void_no_args(ns_window, sel("orderFrontRegardless"));
-        }
-    }
-
-    fn ns_window(window: &Window) -> Option<*mut c_void> {
-        unsafe {
-            let mut info: SdlSysWmInfo = std::mem::zeroed();
-            sdl2::sys::SDL_GetVersion(&mut info.version);
-            if SDL_GetWindowWMInfo(window.raw(), &mut info) == sdl2::sys::SDL_bool::SDL_FALSE {
-                return None;
-            }
-            if info.subsystem != SDL_SYSWM_COCOA {
-                return None;
-            }
-            let ns_window = info.info.cocoa.window;
-            (!ns_window.is_null()).then_some(ns_window)
-        }
-    }
-
-    unsafe fn activate_application() {
-        let ns_application = objc_getClass(cstr("NSApplication").as_ptr());
-        if ns_application.is_null() {
-            return;
-        }
-        let app = send_id(ns_application, sel("sharedApplication"));
-        if app.is_null() {
-            return;
-        }
-        let _ = send_isize_bool(
-            app,
-            sel("setActivationPolicy:"),
-            NS_APPLICATION_ACTIVATION_POLICY_REGULAR,
-        );
-        send_bool(app, sel("activateIgnoringOtherApps:"), true);
-
-        let ns_running_application = objc_getClass(cstr("NSRunningApplication").as_ptr());
-        if ns_running_application.is_null() {
-            return;
-        }
-        let running_app = send_id(ns_running_application, sel("currentApplication"));
-        if running_app.is_null() {
-            return;
-        }
-        let _ = send_usize_bool(
-            running_app,
-            sel("activateWithOptions:"),
-            NS_APPLICATION_ACTIVATE_ALL_WINDOWS | NS_APPLICATION_ACTIVATE_IGNORING_OTHER_APPS,
-        );
-    }
-
-    unsafe fn send_id(receiver: *mut c_void, selector: *mut c_void) -> *mut c_void {
-        let send: unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void =
-            std::mem::transmute(objc_msgSend as *const ());
-        send(receiver, selector)
-    }
-
-    unsafe fn send_bool(receiver: *mut c_void, selector: *mut c_void, value: bool) {
-        let send: unsafe extern "C" fn(*mut c_void, *mut c_void, bool) =
-            std::mem::transmute(objc_msgSend as *const ());
-        send(receiver, selector, value);
-    }
-
-    unsafe fn send_isize_bool(receiver: *mut c_void, selector: *mut c_void, value: isize) -> bool {
-        let send: unsafe extern "C" fn(*mut c_void, *mut c_void, isize) -> bool =
-            std::mem::transmute(objc_msgSend as *const ());
-        send(receiver, selector, value)
-    }
-
-    unsafe fn send_usize_bool(receiver: *mut c_void, selector: *mut c_void, value: usize) -> bool {
-        let send: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> bool =
-            std::mem::transmute(objc_msgSend as *const ());
-        send(receiver, selector, value)
-    }
-
-    unsafe fn send_void(receiver: *mut c_void, selector: *mut c_void, value: *mut c_void) {
-        let send: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) =
-            std::mem::transmute(objc_msgSend as *const ());
-        send(receiver, selector, value);
-    }
-
-    unsafe fn send_void_no_args(receiver: *mut c_void, selector: *mut c_void) {
-        let send: unsafe extern "C" fn(*mut c_void, *mut c_void) =
-            std::mem::transmute(objc_msgSend as *const ());
-        send(receiver, selector);
-    }
-
-    fn sel(name: &str) -> *mut c_void {
-        unsafe { sel_registerName(cstr(name).as_ptr()) }
-    }
-
-    fn cstr(value: &str) -> CString {
-        CString::new(value).expect("Objective-C selector/class names must not contain NUL")
     }
 }
