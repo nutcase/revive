@@ -13,3 +13,4 @@ path = "src/lib.rs"
 
 [dependencies]
 bincode = { version = "2", features = ["derive"] }
+sega8-common = { path = "../sega8-common" }

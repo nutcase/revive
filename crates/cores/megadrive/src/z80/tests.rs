@@ -1,4 +1,3 @@
-
 use super::Z80;
 use crate::audio::AudioBus;
 use crate::cartridge::Cartridge;
@@ -2447,7 +2446,7 @@ fn bank_window_writes_to_68k_work_ram_space() {
     let mut vdp = Vdp::new();
     let mut io = IoBus::new();
     z80.write_reset_byte(0x01);
-    z80.bank_address = 0x00FF_0000;
+    z80.set_bank_address_for_test(0x00FF_0000);
 
     // ld a,0x5A ; ld (0x8000),a ; halt
     z80.write_ram_u8(0x0000, 0x3E);
@@ -2470,7 +2469,7 @@ fn bank_window_reads_io_version_register() {
     let mut vdp = Vdp::new();
     let mut io = IoBus::new();
     z80.write_reset_byte(0x01);
-    z80.bank_address = 0x00A1_0000;
+    z80.set_bank_address_for_test(0x00A1_0000);
 
     // ld a,(0x8000) ; halt
     z80.write_ram_u8(0x0000, 0x3A);
@@ -2491,7 +2490,7 @@ fn bank_window_reads_vdp_hv_counter_bytes() {
     let mut vdp = Vdp::new();
     let mut io = IoBus::new();
     z80.write_reset_byte(0x01);
-    z80.bank_address = 0x00C0_0000;
+    z80.set_bank_address_for_test(0x00C0_0000);
     let expected = vdp.read_hv_counter();
 
     // ld a,(0x8008) ; ld b,a ; ld a,(0x8009) ; halt
@@ -2514,7 +2513,7 @@ fn bank_window_reads_vdp_control_status_bytes() {
     let mut vdp = Vdp::new();
     let mut io = IoBus::new();
     z80.write_reset_byte(0x01);
-    z80.bank_address = 0x00C0_0000;
+    z80.set_bank_address_for_test(0x00C0_0000);
     let expected = vdp.read_control_port();
 
     // ld a,(0x8004) ; ld b,a ; ld a,(0x8005) ; halt
@@ -2537,7 +2536,7 @@ fn bank_window_control_write_executes_pending_vdp_bus_dma() {
     let mut vdp = Vdp::new();
     let mut io = IoBus::new();
     z80.write_reset_byte(0x01);
-    z80.bank_address = 0x00C0_0000;
+    z80.set_bank_address_for_test(0x00C0_0000);
     work_ram[0] = 0x12;
     work_ram[1] = 0x34;
 
@@ -2579,7 +2578,7 @@ fn bank_window_vdp_data_byte_pair_commits_single_word() {
     let mut vdp = Vdp::new();
     let mut io = IoBus::new();
     z80.write_reset_byte(0x01);
-    z80.bank_address = 0x00C0_0000;
+    z80.set_bank_address_for_test(0x00C0_0000);
 
     let mut bus = super::Z80Bus {
         audio: &mut audio,
@@ -2616,7 +2615,7 @@ fn bank_window_can_write_psg_through_68k_bus_address() {
     let mut vdp = Vdp::new();
     let mut io = IoBus::new();
     z80.write_reset_byte(0x01);
-    z80.bank_address = 0x00C0_0000;
+    z80.set_bank_address_for_test(0x00C0_0000);
 
     // ld a,0x9A ; ld (0x8011),a ; halt
     z80.write_ram_u8(0x0000, 0x3E);
@@ -2639,7 +2638,7 @@ fn bank_window_can_write_psg_through_68k_bus_mirror_addresses() {
     let mut vdp = Vdp::new();
     let mut io = IoBus::new();
     z80.write_reset_byte(0x01);
-    z80.bank_address = 0x00C0_0000;
+    z80.set_bank_address_for_test(0x00C0_0000);
 
     // ld a,0x9B ; ld (0x8013),a ; halt
     z80.write_ram_u8(0x0000, 0x3E);
@@ -2656,7 +2655,7 @@ fn bank_window_can_write_psg_through_68k_bus_mirror_addresses() {
     z80 = Z80::new();
     audio = AudioBus::new();
     z80.write_reset_byte(0x01);
-    z80.bank_address = 0x00D0_0000;
+    z80.set_bank_address_for_test(0x00D0_0000);
     z80.write_ram_u8(0x0000, 0x3E);
     z80.write_ram_u8(0x0001, 0x9C);
     z80.write_ram_u8(0x0002, 0x32);
@@ -2674,7 +2673,7 @@ fn bank_register_uses_serial_bit_latch() {
     for _ in 0..8 {
         z80.write_bank_register(1);
     }
-    assert_eq!(z80.bank_address, 0x00FF_0000);
+    assert_eq!(z80.bank_address_for_test(), 0x00FF_0000);
 }
 
 #[test]
