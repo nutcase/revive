@@ -8,15 +8,17 @@ differences between the underlying emulator cores.
 
 ## Supported Systems
 
-- NES / Famicom
-- SNES / Super Famicom
-- SG-1000
-- Master System / Mark III
-- Mega Drive / Genesis
-- PC Engine / TurboGrafx-16
-- Game Boy
-- Game Boy Color
-- Game Boy Advance
+| System | `--system` values | ROM extensions |
+| --- | --- | --- |
+| NES / Famicom | `nes`, `fc`, `famicom` | `.nes` |
+| SNES / Super Famicom | `snes`, `sfc`, `super-famicom`, `superfamicom` | `.sfc`, `.smc` |
+| SG-1000 | `sg1000`, `sg-1000`, `sega-sg1000` | `.sg`, `.sg1000` |
+| Master System / Mark III | `sms`, `mastersystem`, `master-system`, `sega-master-system`, `markiii`, `mark-iii` | `.sms`, `.mk3` |
+| Mega Drive / Genesis | `md`, `genesis`, `megadrive`, `mega-drive` | `.md`, `.gen`, `.genesis`, `.bin` with a Mega Drive `SEGA` header |
+| PC Engine / TurboGrafx-16 | `pce`, `pcengine`, `pc-engine`, `tg16`, `turbografx`, `turbografx-16` | `.pce` |
+| Game Boy | `gb`, `gameboy`, `game-boy` | `.gb` |
+| Game Boy Color | `gbc`, `gameboycolor`, `game-boy-color`, `gameboy-color` | `.gbc` |
+| Game Boy Advance | `gba`, `gameboyadvance`, `game-boy-advance`, `gameboy-advance` | `.gba` |
 
 ## Workspace Layout
 
@@ -123,7 +125,7 @@ Revive detects systems from file extensions.
 - `.sfc`, `.smc`: SNES
 - `.sg`, `.sg1000`: SG-1000
 - `.sms`, `.mk3`: Master System
-- `.md`, `.gen`: Mega Drive
+- `.md`, `.gen`, `.genesis`: Mega Drive
 - `.pce`: PC Engine
 - `.gb`: Game Boy
 - `.gbc`: Game Boy Color

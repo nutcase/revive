@@ -225,7 +225,7 @@ fn print_usage() {
     println!("  revive --select");
     println!();
     println!("If no ROM path is provided, a local file selection dialog opens.");
-    println!("Supported ROM extensions: .nes, .sfc, .smc, .sg, .sg1000, .sms, .mk3, .md, .gen, .pce, .gb, .gbc, .gba, .bin");
+    println!("Supported ROM extensions: .nes, .sfc, .smc, .sg, .sg1000, .sms, .mk3, .md, .gen, .genesis, .pce, .gb, .gbc, .gba, .bin");
 }
 
 fn resolve_rom_path(options: &Options) -> Option<PathBuf> {
@@ -242,15 +242,15 @@ fn select_rom_path() -> Option<PathBuf> {
         .add_filter(
             "ROM files",
             &[
-                "nes", "sfc", "smc", "sg", "sg1000", "sms", "mk3", "md", "gen", "pce", "gb", "gbc",
-                "gba", "bin",
+                "nes", "sfc", "smc", "sg", "sg1000", "sms", "mk3", "md", "gen", "genesis", "pce",
+                "gb", "gbc", "gba", "bin",
             ],
         )
         .add_filter("NES", &["nes"])
         .add_filter("SNES", &["sfc", "smc"])
         .add_filter("SG-1000", &["sg", "sg1000"])
         .add_filter("Master System", &["sms", "mk3"])
-        .add_filter("Mega Drive", &["md", "gen", "bin"])
+        .add_filter("Mega Drive", &["md", "gen", "genesis", "bin"])
         .add_filter("PC Engine", &["pce"])
         .add_filter("Game Boy", &["gb", "gbc"])
         .add_filter("Game Boy Advance", &["gba"])
