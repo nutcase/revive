@@ -11,7 +11,7 @@ mod state;
 use mapper::{
     BandaiFcg, Fme7, IremG101, IremH3001, JalecoSs88006, Mapper15, Mapper246, Mapper40, Mapper42,
     Mapper43, Mapper50, Mmc1, Mmc2, Mmc3, Mmc5, Namco163, Namco210, Sunsoft3, Sunsoft4,
-    TaitoTc0190, TaitoX1005, TaitoX1017, Vrc1, Vrc2Vrc4, Vrc3, Vrc6,
+    TaitoTc0190, TaitoX1005, TaitoX1017, Vrc1, Vrc2Vrc4, Vrc3, Vrc6, Vrc7,
 };
 pub(in crate::cartridge) use mapper_state::{
     Mmc3VariantState, MulticartMapperState, SimpleMapperState,
@@ -57,6 +57,7 @@ struct MapperRuntime {
     vrc1: Option<Vrc1>,
     vrc3: Option<Vrc3>,
     vrc6: Option<Vrc6>,
+    vrc7: Option<Vrc7>,
     mapper15: Option<Mapper15>,
     sunsoft3: Option<Sunsoft3>,
     sunsoft4: Option<Sunsoft4>,

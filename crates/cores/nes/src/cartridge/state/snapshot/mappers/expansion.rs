@@ -10,6 +10,7 @@ pub(super) struct ExpansionSnapshotStates {
     pub(super) taito_x1005: Option<TaitoX1005State>,
     pub(super) taito_x1017: Option<TaitoX1017State>,
     pub(super) vrc6: Option<Vrc6State>,
+    pub(super) vrc7: Option<Vrc7State>,
 }
 
 impl Cartridge {
@@ -59,6 +60,20 @@ impl Cartridge {
             chr_invert: m.chr_invert,
         });
         let vrc6 = self.mappers.vrc6.as_ref().map(snapshot_vrc6_state);
+        let vrc7 = self.mappers.vrc7.as_ref().map(|m| Vrc7State {
+            prg_banks: m.prg_banks,
+            chr_banks: m.chr_banks,
+            control: m.control,
+            wram_enabled: m.wram_enabled,
+            audio_silenced: m.audio_silenced,
+            irq_latch: m.irq_latch,
+            irq_counter: m.irq_counter,
+            irq_enable_after_ack: m.irq_enable_after_ack,
+            irq_enabled: m.irq_enabled,
+            irq_cycle_mode: m.irq_cycle_mode,
+            irq_prescaler: m.irq_prescaler,
+            irq_pending: m.irq_pending.get(),
+        });
 
         ExpansionSnapshotStates {
             mapper246,
@@ -68,6 +83,7 @@ impl Cartridge {
             taito_x1005,
             taito_x1017,
             vrc6,
+            vrc7,
         }
     }
 }

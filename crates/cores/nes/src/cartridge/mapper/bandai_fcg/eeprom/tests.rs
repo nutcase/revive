@@ -44,6 +44,7 @@ fn make_bandai_eeprom_cart(mapper: u8, size: usize) -> Cartridge {
             vrc1: None,
             vrc3: None,
             vrc6: None,
+            vrc7: None,
             mapper15: None,
             sunsoft3: None,
             sunsoft4: None,

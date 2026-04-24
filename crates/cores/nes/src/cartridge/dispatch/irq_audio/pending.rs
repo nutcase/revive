@@ -37,6 +37,7 @@ impl Cartridge {
             || irq_cell_pending(self.mappers.vrc3.as_ref(), |m| &m.irq_pending)
             || irq_cell_pending(self.mappers.vrc2_vrc4.as_ref(), |m| &m.irq_pending)
             || irq_cell_pending(self.mappers.vrc6.as_ref(), |m| &m.irq_pending)
+            || irq_cell_pending(self.mappers.vrc7.as_ref(), |m| &m.irq_pending)
         {
             return true;
         }
@@ -65,6 +66,7 @@ impl Cartridge {
         clear_irq_cell(self.mappers.vrc3.as_ref(), |m| &m.irq_pending);
         clear_irq_cell(self.mappers.vrc2_vrc4.as_ref(), |m| &m.irq_pending);
         clear_irq_cell(self.mappers.vrc6.as_ref(), |m| &m.irq_pending);
+        clear_irq_cell(self.mappers.vrc7.as_ref(), |m| &m.irq_pending);
 
         if self.uses_mapper48() {
             clear_irq_cell(self.mappers.taito_tc0190.as_ref(), |m| &m.irq_pending);

@@ -35,6 +35,7 @@ mod vrc1;
 mod vrc2_vrc4;
 mod vrc3;
 mod vrc6;
+mod vrc7;
 
 pub(super) use bandai_fcg::BandaiFcg;
 pub(super) use fixed_irq::{Mapper40, Mapper42, Mapper43, Mapper50};
@@ -57,3 +58,4 @@ pub(super) use vrc1::Vrc1;
 pub(super) use vrc2_vrc4::Vrc2Vrc4;
 pub(super) use vrc3::Vrc3;
 pub(super) use vrc6::Vrc6;
+pub(super) use vrc7::Vrc7;

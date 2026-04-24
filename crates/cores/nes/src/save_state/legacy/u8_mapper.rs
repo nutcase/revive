@@ -146,6 +146,8 @@ pub(in crate::save_state) struct CartridgeStateU8Mapper {
     pub(in crate::save_state) mapper210: Option<Mapper210State>,
     #[serde(default)]
     pub(in crate::save_state) vrc6: Option<Vrc6State>,
+    #[serde(default)]
+    pub(in crate::save_state) vrc7: Option<Vrc7State>,
 }
 
 impl From<CartridgeStateU8Mapper> for CartridgeState {
@@ -226,6 +228,7 @@ impl From<CartridgeStateU8Mapper> for CartridgeState {
             mapper18: state.mapper18,
             mapper210: state.mapper210,
             vrc6: state.vrc6,
+            vrc7: state.vrc7,
         }
     }
 }

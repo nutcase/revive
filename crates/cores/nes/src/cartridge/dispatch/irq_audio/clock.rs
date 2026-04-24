@@ -115,6 +115,7 @@ impl Cartridge {
             21 => self.clock_irq_mapper21(cycles),
             23 => self.clock_irq_mapper23(cycles),
             25 => self.clock_irq_mapper25(cycles),
+            85 => self.clock_irq_vrc7(cycles),
             _ => {}
         }
 

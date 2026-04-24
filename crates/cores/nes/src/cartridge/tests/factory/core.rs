@@ -68,6 +68,7 @@ pub(in crate::cartridge::tests) fn base_cartridge(
             vrc1: None,
             vrc3: None,
             vrc6: None,
+            vrc7: None,
             mapper15: None,
             sunsoft3: None,
             sunsoft4: None,

@@ -149,6 +149,21 @@ pub struct Vrc6State {
     pub saw: Vrc6SawState,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Vrc7State {
+    pub prg_banks: [u8; 3],
+    pub chr_banks: [u8; 8],
+    pub control: u8,
+    pub wram_enabled: bool,
+    pub audio_silenced: bool,
+    pub irq_latch: u8,
+    pub irq_counter: u8,
+    pub irq_enable_after_ack: bool,
+    pub irq_enabled: bool,
+    pub irq_cycle_mode: bool,
+    pub irq_prescaler: i16,
+    pub irq_pending: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sunsoft3State {
     pub chr_banks: [u8; 4],
     pub prg_bank: u8,

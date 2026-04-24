@@ -3,7 +3,7 @@ use super::MapperSpec;
 const EMPTY_CHR_ROM_MAPPERS: &[u16] = &[63, 153];
 const EMPTY_IF_CHRLESS_MAPPERS: &[u16] = &[18, 221, 231];
 const STANDARD_8K_CHR_RAM_MAPPERS: &[u16] = &[12, 44, 115, 119, 189, 195, 205, 248];
-const CHRLESS_8K_CHR_RAM_MAPPERS: &[u16] = &[1, 4, 10, 18, 48, 65, 118, 221, 231, 236, 245];
+const CHRLESS_8K_CHR_RAM_MAPPERS: &[u16] = &[1, 4, 10, 18, 48, 65, 85, 118, 221, 231, 236, 245];
 const SMALL_MMC3_CHR_RAM_MAPPERS: &[u16] = &[74, 191, 194];
 
 #[derive(Debug, Clone, Copy)]

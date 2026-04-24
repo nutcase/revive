@@ -99,6 +99,7 @@ impl Cartridge {
             mapper18: chips_states.mapper18,
             mapper210: chips_states.mapper210,
             vrc6: expansion_states.vrc6,
+            vrc7: expansion_states.vrc7,
         }
     }
 }

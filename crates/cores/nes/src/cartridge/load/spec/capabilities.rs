@@ -90,6 +90,10 @@ impl MapperSpec {
         matches!(self.mapper, 24 | 26)
     }
 
+    pub(in crate::cartridge::load) fn uses_vrc7(self) -> bool {
+        self.mapper == 85
+    }
+
     pub(in crate::cartridge::load) fn uses_mapper15(self) -> bool {
         self.mapper == 15
     }

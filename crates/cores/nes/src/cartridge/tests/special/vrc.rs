@@ -165,6 +165,55 @@ fn mapper_24_vrc6_chr_ram_writes_use_selected_1k_banks() {
 }
 
 #[test]
+fn mapper_85_vrc7_switches_banks_irq_wram_and_restores_state() {
+    let mut cart = make_vrc7_cart();
+
+    cart.write_prg(0x8000, 0x04);
+    cart.write_prg(0x8010, 0x05);
+    cart.write_prg(0x9000, 0x06);
+    assert_eq!(cart.read_prg(0x8000), 0x04);
+    assert_eq!(cart.read_prg(0xA000), 0x05);
+    assert_eq!(cart.read_prg(0xC000), 0x06);
+    assert_eq!(cart.read_prg(0xE000), 0x3F);
+
+    cart.write_prg(0xA000, 0x03);
+    cart.write_chr(0x0002, 0x5A);
+    cart.write_prg(0xA000, 0x00);
+    assert_eq!(cart.read_chr(0x0002), 0x00);
+    cart.write_prg(0xA000, 0x03);
+    assert_eq!(cart.read_chr(0x0002), 0x5A);
+
+    cart.write_prg(0xE000, 0x83);
+    assert_eq!(cart.mirroring(), Mirroring::OneScreenUpper);
+    cart.write_prg_ram(0x6002, 0x77);
+    assert_eq!(cart.read_prg_ram(0x6002), 0x77);
+
+    cart.write_prg(0xE010, 0xFE);
+    cart.write_prg(0xF000, 0x07);
+    cart.clock_irq_counter_cycles(1);
+    assert!(!cart.irq_pending());
+    cart.clock_irq_counter_cycles(1);
+    assert!(cart.irq_pending());
+
+    let snapshot = cart.snapshot_state();
+    cart.write_prg(0x8000, 0x00);
+    cart.write_prg(0x8010, 0x01);
+    cart.write_prg(0x9000, 0x02);
+    cart.write_prg(0xE000, 0x00);
+    cart.write_prg_ram(0x6002, 0x00);
+    cart.acknowledge_irq();
+
+    cart.restore_state(&snapshot);
+
+    assert_eq!(cart.read_prg(0x8000), 0x04);
+    assert_eq!(cart.read_prg(0xA000), 0x05);
+    assert_eq!(cart.read_prg(0xC000), 0x06);
+    assert_eq!(cart.read_prg_ram(0x6002), 0x77);
+    assert_eq!(cart.mirroring(), Mirroring::OneScreenUpper);
+    assert!(cart.irq_pending());
+}
+
+#[test]
 fn mapper_25_supports_vrc2c_battery_ram_and_vrc4d_irq() {
     let mut cart = make_mapper25_cart(true);
 

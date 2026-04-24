@@ -90,6 +90,7 @@ impl Cartridge {
                 vrc1: instances.vrc1,
                 vrc3: instances.vrc3,
                 vrc6: instances.vrc6,
+                vrc7: instances.vrc7,
                 mapper15: instances.mapper15,
                 sunsoft3: instances.sunsoft3,
                 sunsoft4: instances.sunsoft4,
@@ -139,6 +140,38 @@ mod tests {
         assert_eq!(cart.prg_rom[16 * 1024 - 1], 0x11);
         assert_eq!(cart.chr_rom[0], 0x22);
         assert_eq!(cart.chr_rom[8 * 1024 - 1], 0x22);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_mapper85_allocates_vrc7_ram_and_mapper() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "nes_emulator_vrc7_test_{}_{}.nes",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        let mut rom = Vec::new();
+        rom.extend_from_slice(b"NES\x1A");
+        rom.push(32); // 512KB PRG
+        rom.push(0); // CHR-RAM
+        rom.push(0x52); // mapper 85, battery
+        rom.push(0x50);
+        rom.extend_from_slice(&[0; 8]);
+        rom.extend(std::iter::repeat_n(0xEA, 32 * 16 * 1024));
+        std::fs::write(&path, rom).unwrap();
+
+        let cart = Cartridge::load(path.to_str().unwrap()).unwrap();
+
+        assert_eq!(cart.prg_rom.len(), 32 * 16 * 1024);
+        assert_eq!(cart.prg_ram.len(), 0x2000);
+        assert_eq!(cart.chr_ram.len(), 0x2000);
+        assert!(cart.mappers.vrc7.is_some());
 
         let _ = std::fs::remove_file(path);
     }

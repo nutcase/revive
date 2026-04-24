@@ -61,6 +61,29 @@ impl Cartridge {
             self.chr_bank = saved.chr_banks[0];
             self.vrc6_apply_banking_control(saved.banking_control);
         }
+        if let (Some(ref mut vrc7), Some(saved)) = (self.mappers.vrc7.as_mut(), state.vrc7.as_ref())
+        {
+            vrc7.prg_banks = saved.prg_banks;
+            vrc7.chr_banks = saved.chr_banks;
+            vrc7.control = saved.control;
+            vrc7.wram_enabled = saved.wram_enabled;
+            vrc7.audio_silenced = saved.audio_silenced;
+            vrc7.irq_latch = saved.irq_latch;
+            vrc7.irq_counter = saved.irq_counter;
+            vrc7.irq_enable_after_ack = saved.irq_enable_after_ack;
+            vrc7.irq_enabled = saved.irq_enabled;
+            vrc7.irq_cycle_mode = saved.irq_cycle_mode;
+            vrc7.irq_prescaler = saved.irq_prescaler;
+            vrc7.irq_pending.set(saved.irq_pending);
+            self.prg_bank = saved.prg_banks[0];
+            self.chr_bank = saved.chr_banks[0];
+            self.mirroring = match saved.control & 0x03 {
+                0 => crate::cartridge::Mirroring::Vertical,
+                1 => crate::cartridge::Mirroring::Horizontal,
+                2 => crate::cartridge::Mirroring::OneScreenLower,
+                _ => crate::cartridge::Mirroring::OneScreenUpper,
+            };
+        }
     }
 }
 

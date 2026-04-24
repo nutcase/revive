@@ -146,4 +146,6 @@ pub struct CartridgeState {
     pub mapper210: Option<Mapper210State>,
     #[serde(default)]
     pub vrc6: Option<Vrc6State>,
+    #[serde(default)]
+    pub vrc7: Option<Vrc7State>,
 }

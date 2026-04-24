@@ -105,6 +105,25 @@ pub(in crate::cartridge::tests) fn make_mapper24_chr_ram_cart() -> Cartridge {
     cart
 }
 
+pub(in crate::cartridge::tests) fn make_vrc7_cart() -> Cartridge {
+    let mut prg_rom = vec![0; 64 * 0x2000];
+    for bank in 0..64 {
+        prg_rom[bank * 0x2000..(bank + 1) * 0x2000].fill(bank as u8);
+    }
+
+    let mut cart = base_cartridge(
+        85,
+        prg_rom,
+        vec![],
+        vec![0; 0x2000],
+        vec![0; 0x2000],
+        Mirroring::Vertical,
+    );
+    cart.has_battery = true;
+    cart.mappers.vrc7 = Some(Vrc7::new());
+    cart
+}
+
 pub(in crate::cartridge::tests) fn make_mapper25_cart(has_battery: bool) -> Cartridge {
     let mut prg_rom = vec![0; 64 * 0x2000];
     for bank in 0..64 {

@@ -2,7 +2,8 @@ use super::MapperSpec;
 
 const CPU_IRQ_RAM_MAPPERS: &[u16] = &[18, 21, 23, 24, 25, 26, 68, 240, 241, 245];
 const TINY_PRG_RAM_MAPPERS: &[u16] = &[80, 207];
-const STANDARD_PRG_RAM_MAPPERS: &[u16] = &[1, 4, 9, 10, 15, 16, 32, 69, 73, 74, 118, 119, 192, 194];
+const STANDARD_PRG_RAM_MAPPERS: &[u16] =
+    &[1, 4, 9, 10, 15, 16, 32, 69, 73, 74, 85, 118, 119, 192, 194];
 
 impl MapperSpec {
     pub(in crate::cartridge::load) fn prg_ram_init(self) -> Option<(usize, u8)> {

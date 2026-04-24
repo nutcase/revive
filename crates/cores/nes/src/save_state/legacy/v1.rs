@@ -177,6 +177,7 @@ impl From<CartridgeStateV1> for CartridgeState {
             mapper18: None,
             mapper210: None,
             vrc6: None,
+            vrc7: None,
         }
     }
 }

@@ -2,7 +2,7 @@ use super::spec::MapperSpec;
 use crate::cartridge::{
     BandaiFcg, Fme7, IremG101, IremH3001, JalecoSs88006, Mapper15, Mapper246, Mapper40, Mapper42,
     Mapper43, Mapper50, Mmc1, Mmc2, Mmc3, Mmc5, Namco163, Namco210, Sunsoft3, Sunsoft4,
-    TaitoTc0190, TaitoX1005, TaitoX1017, Vrc1, Vrc2Vrc4, Vrc3, Vrc6,
+    TaitoTc0190, TaitoX1005, TaitoX1017, Vrc1, Vrc2Vrc4, Vrc3, Vrc6, Vrc7,
 };
 
 pub(super) struct MapperInstances {
@@ -25,6 +25,7 @@ pub(super) struct MapperInstances {
     pub(super) vrc1: Option<Vrc1>,
     pub(super) vrc3: Option<Vrc3>,
     pub(super) vrc6: Option<Vrc6>,
+    pub(super) vrc7: Option<Vrc7>,
     pub(super) mapper15: Option<Mapper15>,
     pub(super) sunsoft3: Option<Sunsoft3>,
     pub(super) sunsoft4: Option<Sunsoft4>,
@@ -65,6 +66,7 @@ impl MapperInstances {
             vrc1: spec.uses_vrc1().then(Vrc1::new),
             vrc3: spec.uses_vrc3().then(Vrc3::new),
             vrc6: spec.uses_vrc6().then(Vrc6::new),
+            vrc7: spec.uses_vrc7().then(Vrc7::new),
             mapper15: spec.uses_mapper15().then(Mapper15::new),
             sunsoft3: spec.uses_sunsoft3().then(Sunsoft3::new),
             sunsoft4: spec.uses_sunsoft4().then(Sunsoft4::new),
