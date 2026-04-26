@@ -9,6 +9,8 @@ mod frame_clock;
 mod gl_game;
 mod hud;
 mod input;
+mod render;
+mod session;
 mod state;
 mod window;
 
@@ -18,16 +20,15 @@ use egui_sdl2_gl::gl;
 use egui_sdl2_gl::{DpiScaling, ShaderVersion};
 use events::{process_sdl_events, update_egui_time, EventLoopAction};
 use frame_clock::FrameClock;
-use gl_game::GlGameRenderer;
 use hud::HudToast;
 use input::{release_keyboard_input, sync_keyboard_input, InputState};
+use render::RenderState;
 use revive_cheat::CheatManager;
 use revive_core::{CoreInstance, SystemKind, ROM_EXTENSIONS};
 use sdl2::video::{GLProfile, SwapInterval};
-use state::state_key_help;
+use session::{print_session_banner, CheatPaths};
 use window::bring_window_to_front;
 
-const DEFAULT_SCALE: u32 = 3;
 const PANEL_WIDTH_DEFAULT: f32 = 420.0;
 const PANEL_WIDTH_MIN: f32 = 300.0;
 
@@ -55,35 +56,11 @@ fn run() -> Result<(), Box<dyn Error>> {
     };
 
     let core = CoreInstance::load_rom(&rom_path, options.system)?;
-    let system = core.system();
-    let (cheat_path, legacy_cheat_path) = match &options.cheat_path {
-        Some(path) => (path.clone(), None),
-        None => (
-            default_cheat_path(system, &rom_path),
-            Some(legacy_cheat_path(&rom_path)),
-        ),
-    };
-    let cheats = load_cheats(
-        &cheat_path,
-        options.cheat_path.is_some(),
-        legacy_cheat_path.as_deref(),
-    )?;
+    let cheat_paths = CheatPaths::resolve(options.cheat_path.as_deref(), core.system(), &rom_path);
+    let cheats = cheat_paths.load(options.cheat_path.is_some())?;
 
-    println!("Loaded      : {}", rom_path.display());
-    println!("System      : {}", core.system().label());
-    println!("Title       : {}", core.title());
-    println!("Cheats      : {}", cheat_path.display());
-    for region in core.memory_regions() {
-        println!(
-            "Memory      : {} ({}, {} bytes)",
-            region.id, region.label, region.len
-        );
-    }
-    println!("State keys  : {}", state_key_help());
-    println!("Controls    : arrows move, Enter start, Shift/Backspace select");
-    println!("Cheat panel : Tab toggle");
-
-    run_sdl_loop(core, cheats, &cheat_path, &options)?;
+    print_session_banner(&core, &rom_path, cheat_paths.active());
+    run_sdl_loop(core, cheats, cheat_paths.active(), &options)?;
     Ok(())
 }
 
@@ -195,51 +172,6 @@ fn select_rom_path() -> Option<PathBuf> {
         .pick_file()
 }
 
-fn default_cheat_path(system: SystemKind, rom_path: &Path) -> PathBuf {
-    PathBuf::from("cheats")
-        .join(system.storage_dir())
-        .join(rom_file_stem(rom_path))
-        .join("cheats.json")
-}
-
-fn legacy_cheat_path(rom_path: &Path) -> PathBuf {
-    PathBuf::from("cheats").join(format!("{}.json", rom_file_stem(rom_path)))
-}
-
-fn rom_file_stem(rom_path: &Path) -> String {
-    rom_path
-        .file_stem()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("game")
-        .to_string()
-}
-
-fn load_cheats(
-    path: &Path,
-    required: bool,
-    legacy_path: Option<&Path>,
-) -> Result<CheatManager, Box<dyn Error>> {
-    if path.exists() {
-        let manager = CheatManager::load_from_file(path)?;
-        println!("Loaded cheats: {}", manager.entries.len());
-        return Ok(manager);
-    }
-    if let Some(legacy_path) = legacy_path.filter(|legacy_path| legacy_path.exists()) {
-        let manager = CheatManager::load_from_file(legacy_path)?;
-        println!(
-            "Loaded legacy cheats: {} ({})",
-            manager.entries.len(),
-            legacy_path.display()
-        );
-        return Ok(manager);
-    }
-    if required {
-        return Err(format!("cheat file does not exist: {}", path.display()).into());
-    }
-    Ok(CheatManager::new())
-}
-
 fn run_sdl_loop(
     mut core: CoreInstance,
     mut cheats: CheatManager,
@@ -261,12 +193,13 @@ fn run_sdl_loop(
         let frame = core.frame();
         (frame.width, frame.height)
     };
-    let mut game_w = frame_width as u32 * DEFAULT_SCALE;
-    let mut game_h = frame_height as u32 * DEFAULT_SCALE;
 
     let window_title = format!("Revive - {} - {}", core.system().label(), core.title());
+    let initial_render_state =
+        RenderState::new(frame_width, frame_height, PANEL_WIDTH_DEFAULT as u32);
+    let (initial_w, initial_h) = initial_render_state.initial_window_size();
     let mut window = video
-        .window(&window_title, game_w, game_h)
+        .window(&window_title, initial_w, initial_h)
         .position_centered()
         .resizable()
         .opengl()
@@ -290,8 +223,8 @@ fn run_sdl_loop(
     let mut text_input_active = false;
     text_input.stop();
 
-    let mut game_renderer = GlGameRenderer::new();
-    let mut texture_size = (frame_width, frame_height);
+    let mut render_state = initial_render_state;
+    render_state.resize_window_for_panel(&mut window, false);
 
     let audio_queue = if options.no_audio {
         None
@@ -306,7 +239,6 @@ fn run_sdl_loop(
     let mut cheat_panel = CheatPanel::new();
     let mut hud_toast = HudToast::default();
     let mut prev_panel_visible = cheat_panel.is_visible();
-    let mut panel_width_px = PANEL_WIDTH_DEFAULT as u32;
     let input_debug = std::env::var_os("REVIVE_INPUT_DEBUG").is_some();
     let mut front_retry_frames = 12u8;
 
@@ -341,8 +273,7 @@ fn run_sdl_loop(
         }
 
         if cheat_panel.is_visible() != prev_panel_visible {
-            let new_w = game_window_width(game_w, panel_width_px, cheat_panel.is_visible());
-            let _ = window.set_size(new_w, game_h);
+            render_state.resize_window_for_panel(&mut window, cheat_panel.is_visible());
             prev_panel_visible = cheat_panel.is_visible();
         }
 
@@ -364,39 +295,12 @@ fn run_sdl_loop(
             core.drain_audio_i16(&mut audio_scratch);
         }
 
-        {
-            let frame = core.frame();
-            if (frame.width, frame.height) != texture_size {
-                texture_size = (frame.width, frame.height);
-                game_w = frame.width as u32 * DEFAULT_SCALE;
-                game_h = frame.height as u32 * DEFAULT_SCALE;
-                let new_w = game_window_width(game_w, panel_width_px, cheat_panel.is_visible());
-                let _ = window.set_size(new_w, game_h);
-            }
-            game_renderer.upload_frame(frame.data, frame.width, frame.height, frame.format);
-        }
-
-        let (win_w, win_h) = window.size();
-        unsafe {
-            gl::ClearColor(0.0, 0.0, 0.0, 1.0);
-            gl::Clear(gl::COLOR_BUFFER_BIT);
-        }
-        let panel_px = if cheat_panel.is_visible() {
-            panel_width_px
-        } else {
-            0
-        };
-        let game_vp_w = win_w.saturating_sub(panel_px);
-        game_renderer.draw(0, 0, game_vp_w as i32, win_h as i32);
+        render_state.upload_core_frame(&mut core, &mut window, cheat_panel.is_visible());
+        render_state.draw_game_view(&window, cheat_panel.is_visible());
 
         let draw_ui = cheat_panel.is_visible() || hud_toast.is_visible();
         if draw_ui {
-            unsafe {
-                gl::Viewport(0, 0, win_w as i32, win_h as i32);
-                gl::Enable(gl::BLEND);
-                gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
-                gl::Enable(gl::SCISSOR_TEST);
-            }
+            let (win_w, win_h) = render_state.configure_ui_viewport(&window);
             painter.update_screen_rect((win_w, win_h));
             egui_state.input.screen_rect = Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -424,10 +328,9 @@ fn run_sdl_loop(
                                 });
                         });
                     let actual_w = panel_resp.response.rect.width() as u32;
-                    if actual_w != panel_width_px {
-                        panel_width_px = actual_w;
-                        let _ = window
-                            .set_size(game_window_width(game_w, panel_width_px, true), game_h);
+                    if actual_w != render_state.panel_width_px() {
+                        render_state.set_panel_width_px(actual_w);
+                        render_state.resize_window_for_panel(&mut window, true);
                     }
                 }
                 hud_toast.draw(ctx);
@@ -460,14 +363,6 @@ fn run_sdl_loop(
 fn apply_cheats(core: &mut CoreInstance, cheats: &CheatManager) {
     for entry in cheats.enabled_entries() {
         core.write_memory_byte(&entry.region, entry.offset as usize, entry.value);
-    }
-}
-
-fn game_window_width(game_w: u32, panel_width_px: u32, panel_visible: bool) -> u32 {
-    if panel_visible {
-        game_w + panel_width_px
-    } else {
-        game_w
     }
 }
 

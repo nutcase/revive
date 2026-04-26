@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use pce::emulator::Emulator as PceEmulator;
 
 use super::common::{
-    argb8888_u32_frame_as_bgra8888_bytes, load_state_slot, save_state_slot, write_byte, write_file,
-    write_optional_file,
+    argb8888_u32_frame_as_bgra8888_bytes, fixed_audio_spec, load_state_slot, save_state_slot,
+    write_byte, write_file, write_optional_file,
 };
 use crate::paths::rom_stem;
 use crate::system::{
@@ -89,10 +89,7 @@ impl PceAdapter {
     }
 
     pub fn audio_spec(&self) -> AudioSpec {
-        AudioSpec {
-            sample_rate_hz: 44_100,
-            channels: 1,
-        }
+        fixed_audio_spec(44_100, 1)
     }
 
     pub fn configure_audio_output(&mut self, _sample_rate_hz: u32) {}

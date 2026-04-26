@@ -11,7 +11,9 @@ use emulator_gba::{
     GBA_LCD_WIDTH,
 };
 
-use super::common::{load_state_slot, save_state_slot, write_file, write_optional_file};
+use super::common::{
+    fixed_audio_spec, load_state_slot, save_state_slot, write_file, write_optional_file,
+};
 use crate::paths::rom_stem;
 use crate::system::{
     AudioSpec, FrameView, MemoryRegion, PixelFormat, Result, SystemKind, VirtualButton,
@@ -67,10 +69,7 @@ impl GameBoyAdapter {
     }
 
     pub fn audio_spec(&self) -> AudioSpec {
-        AudioSpec {
-            sample_rate_hz: self.audio_sample_rate_hz,
-            channels: 2,
-        }
+        fixed_audio_spec(self.audio_sample_rate_hz, 2)
     }
 
     pub fn configure_audio_output(&mut self, _sample_rate_hz: u32) {}
@@ -184,10 +183,7 @@ impl GameBoyAdvanceAdapter {
     }
 
     pub fn audio_spec(&self) -> AudioSpec {
-        AudioSpec {
-            sample_rate_hz: self.audio_sample_rate_hz,
-            channels: 2,
-        }
+        fixed_audio_spec(self.audio_sample_rate_hz, 2)
     }
 
     pub fn configure_audio_output(&mut self, _sample_rate_hz: u32) {}

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::paths::{readable_state_path, state_path};
-use crate::system::{Result, SystemKind};
+use crate::system::{AudioSpec, Result, SystemKind};
 
 pub(crate) fn write_byte(memory: &mut [u8], offset: usize, value: u8) -> bool {
     if let Some(slot) = memory.get_mut(offset) {
@@ -15,6 +15,17 @@ pub(crate) fn write_byte(memory: &mut [u8], offset: usize, value: u8) -> bool {
 pub(crate) fn argb8888_u32_frame_as_bgra8888_bytes(frame: &[u32]) -> &[u8] {
     debug_assert!(cfg!(target_endian = "little"));
     unsafe { std::slice::from_raw_parts(frame.as_ptr() as *const u8, std::mem::size_of_val(frame)) }
+}
+
+pub(crate) fn fixed_audio_spec(sample_rate_hz: u32, channels: u8) -> AudioSpec {
+    AudioSpec {
+        sample_rate_hz,
+        channels,
+    }
+}
+
+pub(crate) fn replace_audio_buffer(out: &mut Vec<i16>, samples: Vec<i16>) {
+    *out = samples;
 }
 
 pub(crate) fn save_state_slot(

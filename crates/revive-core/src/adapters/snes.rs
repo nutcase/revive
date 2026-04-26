@@ -4,7 +4,8 @@ use snes_emulator::cartridge::Cartridge as SnesCartridge;
 use snes_emulator::emulator::Emulator as SnesEmulator;
 
 use super::common::{
-    argb8888_u32_frame_as_bgra8888_bytes, load_state_slot, save_state_slot, write_byte,
+    argb8888_u32_frame_as_bgra8888_bytes, fixed_audio_spec, load_state_slot, save_state_slot,
+    write_byte,
 };
 use crate::paths::rom_stem;
 use crate::system::{
@@ -69,10 +70,7 @@ impl SnesAdapter {
     }
 
     pub fn audio_spec(&self) -> AudioSpec {
-        AudioSpec {
-            sample_rate_hz: self.audio_sample_rate_hz,
-            channels: 2,
-        }
+        fixed_audio_spec(self.audio_sample_rate_hz, 2)
     }
 
     pub fn configure_audio_output(&mut self, _sample_rate_hz: u32) {}

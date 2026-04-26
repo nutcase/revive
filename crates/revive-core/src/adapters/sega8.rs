@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use mastersystem_core::{Button as SmsButton, Emulator as SmsEmulator};
 use sg1000_core::{Button as SgButton, Emulator as SgEmulator};
 
-use super::common::{load_state_slot, save_state_slot, write_byte};
+use super::common::{
+    fixed_audio_spec, load_state_slot, replace_audio_buffer, save_state_slot, write_byte,
+};
 use crate::paths::rom_stem;
 use crate::system::{
     AudioSpec, FrameView, MemoryRegion, PixelFormat, Result, SystemKind, VirtualButton,
@@ -263,10 +265,10 @@ impl<E: Sega8Emulator> Sega8Adapter<E> {
     }
 
     fn audio_spec(&self) -> AudioSpec {
-        AudioSpec {
-            sample_rate_hz: self.audio_sample_rate_hz,
-            channels: self.emulator.audio_output_channels(),
-        }
+        fixed_audio_spec(
+            self.audio_sample_rate_hz,
+            self.emulator.audio_output_channels(),
+        )
     }
 
     fn configure_audio_output(&mut self, sample_rate_hz: u32) {
@@ -277,7 +279,7 @@ impl<E: Sega8Emulator> Sega8Adapter<E> {
 
     fn drain_audio_i16(&mut self, out: &mut Vec<i16>) {
         let max_samples = ((self.audio_sample_rate_hz as usize) / 20).max(1024) * 2;
-        *out = self.emulator.drain_audio_samples(max_samples);
+        replace_audio_buffer(out, self.emulator.drain_audio_samples(max_samples));
     }
 
     fn save_state_to_slot(&mut self, slot: u8) -> Result<()> {
