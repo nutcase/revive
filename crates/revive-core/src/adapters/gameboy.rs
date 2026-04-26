@@ -11,7 +11,8 @@ use emulator_gba::{
     GBA_LCD_WIDTH,
 };
 
-use crate::paths::{readable_state_path, rom_stem, state_path};
+use super::common::{load_state_slot, save_state_slot, write_file, write_optional_file};
+use crate::paths::rom_stem;
 use crate::system::{
     AudioSpec, FrameView, MemoryRegion, PixelFormat, Result, SystemKind, VirtualButton,
 };
@@ -127,11 +128,10 @@ impl GameBoyAdapter {
     }
 
     pub fn flush_persistent_save(&mut self) -> Result<()> {
-        if let Some(save_data) = self.emulator.backup_data() {
-            std::fs::write(self.rom_path.with_extension("sav"), save_data)
-                .map_err(|err| err.to_string())?;
-        }
-        Ok(())
+        write_optional_file(
+            &self.rom_path.with_extension("sav"),
+            self.emulator.backup_data().as_deref(),
+        )
     }
 }
 
@@ -224,14 +224,30 @@ impl GameBoyAdvanceAdapter {
     }
 
     pub fn save_state_to_slot(&mut self, slot: u8) -> Result<()> {
-        let path = state_path(SystemKind::GameBoyAdvance, &self.rom_path, slot, "gbas");
-        let state_data = self.emulator.save_state();
-        std::fs::write(path, state_data).map_err(|err| err.to_string())
+        save_state_slot(
+            SystemKind::GameBoyAdvance,
+            &self.rom_path,
+            slot,
+            "gbas",
+            |path| {
+                let state_data = self.emulator.save_state();
+                write_file(path, &state_data)
+            },
+        )
     }
 
     pub fn load_state_from_slot(&mut self, slot: u8) -> Result<()> {
-        let path = readable_state_path(SystemKind::GameBoyAdvance, &self.rom_path, slot, "gbas")?;
-        let state_data = std::fs::read(path).map_err(|err| err.to_string())?;
+        let mut state_data = Vec::new();
+        load_state_slot(
+            SystemKind::GameBoyAdvance,
+            &self.rom_path,
+            slot,
+            "gbas",
+            |path| {
+                state_data = std::fs::read(path).map_err(|err| err.to_string())?;
+                Ok(())
+            },
+        )?;
         self.emulator
             .load_state(&state_data)
             .map_err(|err| err.to_string())?;
@@ -241,11 +257,10 @@ impl GameBoyAdvanceAdapter {
     }
 
     pub fn flush_persistent_save(&mut self) -> Result<()> {
-        if let Some(save_data) = self.emulator.backup_data() {
-            std::fs::write(self.rom_path.with_extension("sav"), save_data)
-                .map_err(|err| err.to_string())?;
-        }
-        Ok(())
+        write_optional_file(
+            &self.rom_path.with_extension("sav"),
+            self.emulator.backup_data().as_deref(),
+        )
     }
 }
 fn gameboy_button_mask(button: VirtualButton) -> Option<u8> {

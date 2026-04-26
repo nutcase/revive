@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 mod audio;
 mod cheat_panel;
+mod events;
 mod frame_clock;
 mod gl_game;
 mod hud;
@@ -15,18 +16,15 @@ use audio::{feed_audio, open_audio_queue};
 use cheat_panel::{CheatPanel, MemorySnapshot};
 use egui_sdl2_gl::gl;
 use egui_sdl2_gl::{DpiScaling, ShaderVersion};
+use events::{process_sdl_events, update_egui_time, EventLoopAction};
 use frame_clock::FrameClock;
 use gl_game::GlGameRenderer;
 use hud::HudToast;
-use input::{
-    button_label, keycode_button, release_keyboard_input, sync_keyboard_input, InputState,
-};
+use input::{release_keyboard_input, sync_keyboard_input, InputState};
 use revive_cheat::CheatManager;
 use revive_core::{CoreInstance, SystemKind, ROM_EXTENSIONS};
-use sdl2::event::{Event, WindowEvent};
-use sdl2::keyboard::Keycode;
 use sdl2::video::{GLProfile, SwapInterval};
-use state::{handle_state_key, state_key_help};
+use state::state_key_help;
 use window::bring_window_to_front;
 
 const DEFAULT_SCALE: u32 = 3;
@@ -322,117 +320,28 @@ fn run_sdl_loop(
             }
             text_input_active = should_enable_text_input;
         }
-        egui_state.input.time = Some(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs_f64(),
-        );
+        update_egui_time(&mut egui_state);
 
-        for event in event_pump.poll_iter() {
-            if cheat_panel.is_visible() {
-                if let Some(filtered) = filter_event_for_ascii_text_input(&event) {
-                    egui_state.process_input(&window, filtered, &mut painter);
-                }
-            }
-
-            match &event {
-                Event::Quit { .. } => break 'running,
-                Event::Window {
-                    win_event: WindowEvent::FocusGained,
-                    ..
-                } => {
-                    if input_debug {
-                        eprintln!("input: focus gained");
-                    }
-                }
-                Event::Window {
-                    win_event: WindowEvent::FocusLost,
-                    ..
-                } => {
-                    if input_debug {
-                        eprintln!("input: focus lost");
-                    }
-                    input_state.clear();
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    repeat: false,
-                    ..
-                } if cheat_panel.is_visible() => {
-                    cheat_panel.hide();
-                    continue;
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => break 'running,
-                Event::KeyDown {
-                    keycode: Some(key),
-                    scancode,
-                    keymod,
-                    repeat: false,
-                    ..
-                } => {
-                    let key = *key;
-                    let scancode = *scancode;
-                    let keymod = *keymod;
-                    if key == Keycode::Tab {
-                        if cheat_panel.is_visible() {
-                            cheat_panel.hide();
-                        } else {
-                            let live_memory = MemorySnapshot::capture(&core);
-                            cheat_panel.toggle(&live_memory);
-                        }
-                        continue;
-                    }
-                    if handle_state_key(&mut core, key, scancode, keymod, &mut hud_toast) {
-                        continue;
-                    }
-                    if cheat_panel.is_visible() && egui_ctx.wants_keyboard_input() {
-                        continue;
-                    }
-                    if let Some(button) = keycode_button(core.system(), key) {
-                        if input_debug {
-                            eprintln!("input: key down {key:?} -> {}", button_label(button));
-                        }
-                        input_state.set(button, true);
-                    } else if input_debug {
-                        eprintln!("input: key down {key:?}");
-                    }
-                }
-                Event::KeyUp {
-                    keycode: Some(key),
-                    repeat: false,
-                    ..
-                } => {
-                    let key = *key;
-                    // Mirror KeyDown: only swallow the release when egui
-                    // actually owns keyboard focus (e.g. a cheat text
-                    // field is active). Dropping every KeyUp while the
-                    // panel is open left game buttons stuck down.
-                    if cheat_panel.is_visible() && egui_ctx.wants_keyboard_input() {
-                        continue;
-                    }
-                    if let Some(button) = keycode_button(core.system(), key) {
-                        if input_debug {
-                            eprintln!("input: key up {key:?} -> {}", button_label(button));
-                        }
-                        input_state.set(button, false);
-                    } else if input_debug {
-                        eprintln!("input: key up {key:?}");
-                    }
-                }
-                _ => {}
-            }
+        if matches!(
+            process_sdl_events(
+                &mut event_pump,
+                &window,
+                &mut painter,
+                &mut egui_state,
+                &egui_ctx,
+                &mut core,
+                &mut cheat_panel,
+                &mut input_state,
+                &mut hud_toast,
+                input_debug,
+            ),
+            EventLoopAction::Exit
+        ) {
+            break 'running;
         }
 
         if cheat_panel.is_visible() != prev_panel_visible {
-            let new_w = if cheat_panel.is_visible() {
-                game_w + panel_width_px
-            } else {
-                game_w
-            };
+            let new_w = game_window_width(game_w, panel_width_px, cheat_panel.is_visible());
             let _ = window.set_size(new_w, game_h);
             prev_panel_visible = cheat_panel.is_visible();
         }
@@ -461,11 +370,7 @@ fn run_sdl_loop(
                 texture_size = (frame.width, frame.height);
                 game_w = frame.width as u32 * DEFAULT_SCALE;
                 game_h = frame.height as u32 * DEFAULT_SCALE;
-                let new_w = if cheat_panel.is_visible() {
-                    game_w + panel_width_px
-                } else {
-                    game_w
-                };
+                let new_w = game_window_width(game_w, panel_width_px, cheat_panel.is_visible());
                 let _ = window.set_size(new_w, game_h);
             }
             game_renderer.upload_frame(frame.data, frame.width, frame.height, frame.format);
@@ -521,7 +426,8 @@ fn run_sdl_loop(
                     let actual_w = panel_resp.response.rect.width() as u32;
                     if actual_w != panel_width_px {
                         panel_width_px = actual_w;
-                        let _ = window.set_size(game_w + panel_width_px, game_h);
+                        let _ = window
+                            .set_size(game_window_width(game_w, panel_width_px, true), game_h);
                     }
                 }
                 hud_toast.draw(ctx);
@@ -557,29 +463,14 @@ fn apply_cheats(core: &mut CoreInstance, cheats: &CheatManager) {
     }
 }
 
-fn sdl_error(message: String) -> io::Error {
-    io::Error::other(message)
+fn game_window_width(game_w: u32, panel_width_px: u32, panel_visible: bool) -> u32 {
+    if panel_visible {
+        game_w + panel_width_px
+    } else {
+        game_w
+    }
 }
 
-fn filter_event_for_ascii_text_input(event: &Event) -> Option<Event> {
-    match event {
-        Event::TextEditing { .. } => None,
-        Event::TextInput {
-            timestamp,
-            window_id,
-            text,
-        } => {
-            let ascii_text: String = text.chars().filter(|ch| ch.is_ascii()).collect();
-            if ascii_text.is_empty() {
-                None
-            } else {
-                Some(Event::TextInput {
-                    timestamp: *timestamp,
-                    window_id: *window_id,
-                    text: ascii_text,
-                })
-            }
-        }
-        _ => Some(event.clone()),
-    }
+fn sdl_error(message: String) -> io::Error {
+    io::Error::other(message)
 }

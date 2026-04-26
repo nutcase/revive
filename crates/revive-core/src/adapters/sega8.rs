@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use mastersystem_core::{Button as SmsButton, Emulator as SmsEmulator};
 use sg1000_core::{Button as SgButton, Emulator as SgEmulator};
 
-use super::common::write_byte;
-use crate::paths::{readable_state_path, rom_stem, state_path};
+use super::common::{load_state_slot, save_state_slot, write_byte};
+use crate::paths::rom_stem;
 use crate::system::{
     AudioSpec, FrameView, MemoryRegion, PixelFormat, Result, SystemKind, VirtualButton,
 };
@@ -24,6 +24,13 @@ trait Sega8Emulator: Sized {
     fn drain_audio_samples(&mut self, max_samples: usize) -> Vec<i16>;
     fn save_state_to_file(&self, path: &Path) -> Result<()>;
     fn load_state_from_file(&mut self, path: &Path) -> Result<()>;
+}
+
+trait Sega8Platform {
+    fn set_virtual_button(&mut self, player: u8, button: VirtualButton, pressed: bool);
+    fn memory_regions(&self) -> Vec<MemoryRegion>;
+    fn read_memory(&self, region_id: &str) -> Option<&[u8]>;
+    fn write_memory_byte(&mut self, region_id: &str, offset: usize, value: u8) -> bool;
 }
 
 impl Sega8Emulator for SgEmulator {
@@ -118,6 +125,98 @@ impl Sega8Emulator for SmsEmulator {
     }
 }
 
+impl Sega8Platform for SgEmulator {
+    fn set_virtual_button(&mut self, player: u8, button: VirtualButton, pressed: bool) {
+        let Some(button) = sg1000_button(button) else {
+            return;
+        };
+        self.set_button_pressed(player, button, pressed);
+    }
+
+    fn memory_regions(&self) -> Vec<MemoryRegion> {
+        vec![
+            MemoryRegion {
+                id: "wram",
+                label: "Work RAM",
+                len: self.work_ram().len(),
+                writable: true,
+            },
+            MemoryRegion {
+                id: "vram",
+                label: "VDP VRAM",
+                len: self.vram().len(),
+                writable: true,
+            },
+        ]
+    }
+
+    fn read_memory(&self, region_id: &str) -> Option<&[u8]> {
+        match region_id {
+            "wram" => Some(self.work_ram()),
+            "vram" => Some(self.vram()),
+            _ => None,
+        }
+    }
+
+    fn write_memory_byte(&mut self, region_id: &str, offset: usize, value: u8) -> bool {
+        match region_id {
+            "wram" => write_byte(self.work_ram_mut(), offset, value),
+            "vram" => write_byte(self.vram_mut(), offset, value),
+            _ => false,
+        }
+    }
+}
+
+impl Sega8Platform for SmsEmulator {
+    fn set_virtual_button(&mut self, player: u8, button: VirtualButton, pressed: bool) {
+        let Some(button) = mastersystem_button(button) else {
+            return;
+        };
+        self.set_button_pressed(player, button, pressed);
+    }
+
+    fn memory_regions(&self) -> Vec<MemoryRegion> {
+        vec![
+            MemoryRegion {
+                id: "wram",
+                label: "Work RAM",
+                len: self.work_ram().len(),
+                writable: true,
+            },
+            MemoryRegion {
+                id: "cart_ram",
+                label: "Cartridge RAM",
+                len: self.cart_ram().len(),
+                writable: true,
+            },
+            MemoryRegion {
+                id: "vram",
+                label: "VDP VRAM",
+                len: self.vram().len(),
+                writable: true,
+            },
+        ]
+    }
+
+    fn read_memory(&self, region_id: &str) -> Option<&[u8]> {
+        match region_id {
+            "wram" => Some(self.work_ram()),
+            "cart_ram" => Some(self.cart_ram()),
+            "vram" => Some(self.vram()),
+            _ => None,
+        }
+    }
+
+    fn write_memory_byte(&mut self, region_id: &str, offset: usize, value: u8) -> bool {
+        match region_id {
+            "wram" => write_byte(self.work_ram_mut(), offset, value),
+            "cart_ram" => write_byte(self.cart_ram_mut(), offset, value),
+            "vram" => write_byte(self.vram_mut(), offset, value),
+            _ => false,
+        }
+    }
+}
+
 struct Sega8Adapter<E: Sega8Emulator> {
     emulator: E,
     rom_path: PathBuf,
@@ -182,13 +281,36 @@ impl<E: Sega8Emulator> Sega8Adapter<E> {
     }
 
     fn save_state_to_slot(&mut self, slot: u8) -> Result<()> {
-        let path = state_path(E::SYSTEM, &self.rom_path, slot, E::STATE_EXT);
-        self.emulator.save_state_to_file(&path)
+        save_state_slot(E::SYSTEM, &self.rom_path, slot, E::STATE_EXT, |path| {
+            self.emulator.save_state_to_file(path)
+        })
     }
 
     fn load_state_from_slot(&mut self, slot: u8) -> Result<()> {
-        let path = readable_state_path(E::SYSTEM, &self.rom_path, slot, E::STATE_EXT)?;
-        self.emulator.load_state_from_file(&path)
+        load_state_slot(E::SYSTEM, &self.rom_path, slot, E::STATE_EXT, |path| {
+            self.emulator.load_state_from_file(path)
+        })
+    }
+}
+
+impl<E> Sega8Adapter<E>
+where
+    E: Sega8Emulator + Sega8Platform,
+{
+    fn set_button(&mut self, player: u8, button: VirtualButton, pressed: bool) {
+        self.emulator.set_virtual_button(player, button, pressed);
+    }
+
+    fn memory_regions(&self) -> Vec<MemoryRegion> {
+        self.emulator.memory_regions()
+    }
+
+    fn read_memory(&self, region_id: &str) -> Option<&[u8]> {
+        self.emulator.read_memory(region_id)
+    }
+
+    fn write_memory_byte(&mut self, region_id: &str, offset: usize, value: u8) -> bool {
+        self.emulator.write_memory_byte(region_id, offset, value)
     }
 }
 
@@ -234,6 +356,22 @@ macro_rules! impl_common_adapter {
             pub fn flush_persistent_save(&mut self) -> Result<()> {
                 Ok(())
             }
+
+            pub fn set_button(&mut self, player: u8, button: VirtualButton, pressed: bool) {
+                self.0.set_button(player, button, pressed);
+            }
+
+            pub fn memory_regions(&self) -> Vec<MemoryRegion> {
+                self.0.memory_regions()
+            }
+
+            pub fn read_memory(&self, region_id: &str) -> Option<&[u8]> {
+                self.0.read_memory(region_id)
+            }
+
+            pub fn write_memory_byte(&mut self, region_id: &str, offset: usize, value: u8) -> bool {
+                self.0.write_memory_byte(region_id, offset, value)
+            }
         }
     };
 }
@@ -242,101 +380,9 @@ pub struct Sg1000Adapter(Sega8Adapter<SgEmulator>);
 
 impl_common_adapter!(Sg1000Adapter);
 
-impl Sg1000Adapter {
-    pub fn set_button(&mut self, player: u8, button: VirtualButton, pressed: bool) {
-        let Some(button) = sg1000_button(button) else {
-            return;
-        };
-        self.0.emulator.set_button_pressed(player, button, pressed);
-    }
-
-    pub fn memory_regions(&self) -> Vec<MemoryRegion> {
-        vec![
-            MemoryRegion {
-                id: "wram",
-                label: "Work RAM",
-                len: self.0.emulator.work_ram().len(),
-                writable: true,
-            },
-            MemoryRegion {
-                id: "vram",
-                label: "VDP VRAM",
-                len: self.0.emulator.vram().len(),
-                writable: true,
-            },
-        ]
-    }
-
-    pub fn read_memory(&self, region_id: &str) -> Option<&[u8]> {
-        match region_id {
-            "wram" => Some(self.0.emulator.work_ram()),
-            "vram" => Some(self.0.emulator.vram()),
-            _ => None,
-        }
-    }
-
-    pub fn write_memory_byte(&mut self, region_id: &str, offset: usize, value: u8) -> bool {
-        match region_id {
-            "wram" => write_byte(self.0.emulator.work_ram_mut(), offset, value),
-            "vram" => write_byte(self.0.emulator.vram_mut(), offset, value),
-            _ => false,
-        }
-    }
-}
-
 pub struct MasterSystemAdapter(Sega8Adapter<SmsEmulator>);
 
 impl_common_adapter!(MasterSystemAdapter);
-
-impl MasterSystemAdapter {
-    pub fn set_button(&mut self, player: u8, button: VirtualButton, pressed: bool) {
-        let Some(button) = mastersystem_button(button) else {
-            return;
-        };
-        self.0.emulator.set_button_pressed(player, button, pressed);
-    }
-
-    pub fn memory_regions(&self) -> Vec<MemoryRegion> {
-        vec![
-            MemoryRegion {
-                id: "wram",
-                label: "Work RAM",
-                len: self.0.emulator.work_ram().len(),
-                writable: true,
-            },
-            MemoryRegion {
-                id: "cart_ram",
-                label: "Cartridge RAM",
-                len: self.0.emulator.cart_ram().len(),
-                writable: true,
-            },
-            MemoryRegion {
-                id: "vram",
-                label: "VDP VRAM",
-                len: self.0.emulator.vram().len(),
-                writable: true,
-            },
-        ]
-    }
-
-    pub fn read_memory(&self, region_id: &str) -> Option<&[u8]> {
-        match region_id {
-            "wram" => Some(self.0.emulator.work_ram()),
-            "cart_ram" => Some(self.0.emulator.cart_ram()),
-            "vram" => Some(self.0.emulator.vram()),
-            _ => None,
-        }
-    }
-
-    pub fn write_memory_byte(&mut self, region_id: &str, offset: usize, value: u8) -> bool {
-        match region_id {
-            "wram" => write_byte(self.0.emulator.work_ram_mut(), offset, value),
-            "cart_ram" => write_byte(self.0.emulator.cart_ram_mut(), offset, value),
-            "vram" => write_byte(self.0.emulator.vram_mut(), offset, value),
-            _ => false,
-        }
-    }
-}
 
 fn sg1000_button(button: VirtualButton) -> Option<SgButton> {
     match button {

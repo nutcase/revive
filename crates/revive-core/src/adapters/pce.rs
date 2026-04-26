@@ -2,8 +2,11 @@ use std::path::{Path, PathBuf};
 
 use pce::emulator::Emulator as PceEmulator;
 
-use super::common::{argb8888_u32_frame_as_bgra8888_bytes, write_byte};
-use crate::paths::{readable_state_path, rom_stem, state_path};
+use super::common::{
+    argb8888_u32_frame_as_bgra8888_bytes, load_state_slot, save_state_slot, write_byte, write_file,
+    write_optional_file,
+};
+use crate::paths::rom_stem;
 use crate::system::{
     AudioSpec, FrameView, MemoryRegion, PixelFormat, Result, SystemKind, VirtualButton,
 };
@@ -160,17 +163,19 @@ impl PceAdapter {
     }
 
     pub fn save_state_to_slot(&mut self, slot: u8) -> Result<()> {
-        let path = state_path(SystemKind::Pce, &self.rom_path, slot, "pcst");
-        self.emulator
-            .save_state_to_file(&path)
-            .map_err(|err| err.to_string())
+        save_state_slot(SystemKind::Pce, &self.rom_path, slot, "pcst", |path| {
+            self.emulator
+                .save_state_to_file(path)
+                .map_err(|err| err.to_string())
+        })
     }
 
     pub fn load_state_from_slot(&mut self, slot: u8) -> Result<()> {
-        let path = readable_state_path(SystemKind::Pce, &self.rom_path, slot, "pcst")?;
-        self.emulator
-            .load_state_from_file(&path)
-            .map_err(|err| err.to_string())?;
+        load_state_slot(SystemKind::Pce, &self.rom_path, slot, "pcst", |path| {
+            self.emulator
+                .load_state_from_file(path)
+                .map_err(|err| err.to_string())
+        })?;
         self.emulator.bus.set_joypad_input(self.pad_state);
         Ok(())
     }
@@ -179,15 +184,12 @@ impl PceAdapter {
         if !self.hucard {
             return Ok(());
         }
-        if let Some(snapshot) = self.emulator.save_backup_ram() {
-            std::fs::write(self.rom_path.with_extension("sav"), snapshot)
-                .map_err(|err| err.to_string())?;
-        }
-        std::fs::write(
-            self.rom_path.with_extension("brm"),
-            self.emulator.save_bram(),
-        )
-        .map_err(|err| err.to_string())?;
+        write_optional_file(
+            &self.rom_path.with_extension("sav"),
+            self.emulator.save_backup_ram().as_deref(),
+        )?;
+        let bram = self.emulator.save_bram();
+        write_file(&self.rom_path.with_extension("brm"), &bram)?;
         Ok(())
     }
 }

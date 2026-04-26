@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use megadrive_core::{Button as MdButton, Cartridge as MdCartridge};
 
-use super::common::write_byte;
-use crate::paths::{readable_state_path, rom_stem, state_path};
+use super::common::{load_state_slot, save_state_slot, write_byte};
+use crate::paths::rom_stem;
 use crate::system::{
     AudioSpec, FrameView, MemoryRegion, PixelFormat, Result, SystemKind, VirtualButton,
 };
@@ -107,13 +107,23 @@ impl MegaDriveAdapter {
     }
 
     pub fn save_state_to_slot(&mut self, slot: u8) -> Result<()> {
-        let path = state_path(SystemKind::MegaDrive, &self.rom_path, slot, "mdst");
-        self.emulator.save_state_to_file(&path)
+        save_state_slot(
+            SystemKind::MegaDrive,
+            &self.rom_path,
+            slot,
+            "mdst",
+            |path| self.emulator.save_state_to_file(path),
+        )
     }
 
     pub fn load_state_from_slot(&mut self, slot: u8) -> Result<()> {
-        let path = readable_state_path(SystemKind::MegaDrive, &self.rom_path, slot, "mdst")?;
-        self.emulator.load_state_from_file(&path)
+        load_state_slot(
+            SystemKind::MegaDrive,
+            &self.rom_path,
+            slot,
+            "mdst",
+            |path| self.emulator.load_state_from_file(path),
+        )
     }
 
     pub fn flush_persistent_save(&mut self) -> Result<()> {
