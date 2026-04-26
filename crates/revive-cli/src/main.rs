@@ -224,6 +224,7 @@ fn run_sdl_loop(
     text_input.stop();
 
     let mut render_state = initial_render_state;
+    render_state.initialize_gl();
     render_state.resize_window_for_panel(&mut window, false);
 
     let audio_queue = if options.no_audio {

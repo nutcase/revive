@@ -7,7 +7,7 @@ use revive_core::CoreInstance;
 const DEFAULT_SCALE: u32 = 3;
 
 pub(crate) struct RenderState {
-    game_renderer: GlGameRenderer,
+    game_renderer: Option<GlGameRenderer>,
     texture_size: (usize, usize),
     game_w: u32,
     game_h: u32,
@@ -17,11 +17,17 @@ pub(crate) struct RenderState {
 impl RenderState {
     pub(crate) fn new(frame_width: usize, frame_height: usize, panel_width_px: u32) -> Self {
         Self {
-            game_renderer: GlGameRenderer::new(),
+            game_renderer: None,
             texture_size: (frame_width, frame_height),
             game_w: frame_width as u32 * DEFAULT_SCALE,
             game_h: frame_height as u32 * DEFAULT_SCALE,
             panel_width_px,
+        }
+    }
+
+    pub(crate) fn initialize_gl(&mut self) {
+        if self.game_renderer.is_none() {
+            self.game_renderer = Some(GlGameRenderer::new());
         }
     }
 
@@ -55,6 +61,8 @@ impl RenderState {
             self.resize_window_for_panel(window, panel_visible);
         }
         self.game_renderer
+            .as_mut()
+            .expect("OpenGL renderer must be initialized before frame upload")
             .upload_frame(frame.data, frame.width, frame.height, frame.format);
     }
 
@@ -71,6 +79,8 @@ impl RenderState {
         };
         let game_vp_w = win_w.saturating_sub(panel_px);
         self.game_renderer
+            .as_ref()
+            .expect("OpenGL renderer must be initialized before drawing")
             .draw(0, 0, game_vp_w as i32, win_h as i32);
     }
 
