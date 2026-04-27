@@ -14,7 +14,7 @@ mod session;
 mod state;
 mod window;
 
-use audio::{feed_audio, open_audio_queue};
+use audio::{feed_audio, open_audio_output};
 use cheat_panel::{CheatPanel, MemorySnapshot};
 use egui_sdl2_gl::gl;
 use egui_sdl2_gl::{DpiScaling, ShaderVersion};
@@ -55,7 +55,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         return Ok(());
     };
 
-    let core = CoreInstance::load_rom(&rom_path, options.system)?;
+    let core = CoreInstance::load_rom_with_audio(&rom_path, options.system, !options.no_audio)?;
     let cheat_paths = CheatPaths::resolve(options.cheat_path.as_deref(), core.system(), &rom_path);
     let cheats = cheat_paths.load(options.cheat_path.is_some())?;
 
@@ -227,12 +227,12 @@ fn run_sdl_loop(
     render_state.initialize_gl();
     render_state.resize_window_for_panel(&mut window, false);
 
-    let audio_queue = if options.no_audio {
+    let audio_output = if options.no_audio {
         None
     } else {
-        Some(open_audio_queue(&sdl, &mut core)?)
+        Some(open_audio_output(&sdl, &mut core)?)
     };
-    let mut audio_queue = audio_queue;
+    let audio_output = audio_output;
     let mut audio_scratch = Vec::new();
     let mut event_pump = sdl.event_pump().map_err(sdl_error)?;
     let mut frame_clock = FrameClock::new(core.system());
@@ -290,8 +290,8 @@ fn run_sdl_loop(
         }
         apply_cheats(&mut core, &cheats);
 
-        if let Some(queue) = audio_queue.as_mut() {
-            feed_audio(queue, &mut core, &mut audio_scratch)?;
+        if let Some(output) = audio_output.as_ref() {
+            feed_audio(output, &mut core, &mut audio_scratch);
         } else {
             core.drain_audio_i16(&mut audio_scratch);
         }

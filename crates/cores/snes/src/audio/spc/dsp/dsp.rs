@@ -694,11 +694,15 @@ impl Dsp {
                         let l_hi = self.emulator().read_u8(entry + 3) as u16;
                         let start = (s_hi << 8) | s_lo;
                         let lp = (l_hi << 8) | l_lo;
+                        let mut brr = [0u8; 9];
+                        for (offset, byte) in brr.iter_mut().enumerate() {
+                            *byte = self.emulator().read_u8(u32::from(start) + offset as u32);
+                        }
                         eprintln!(
-                            "[DSP-KON] v{} src={} pitch={:04X} vol=({:02X},{:02X}) DIR={:02X} smp@{:04X} loop@{:04X} adsr=({:02X},{:02X})",
+                            "[DSP-KON] v{} src={} pitch={:04X} vol=({:02X},{:02X}) DIR={:02X} smp@{:04X} loop@{:04X} adsr=({:02X},{:02X}) gain={:02X} brr={:02X?}",
                             i, v.source, pitch, v.vol_left, v.vol_right,
                             self.source_dir, start, lp,
-                            v.envelope.adsr0, v.envelope.adsr1
+                            v.envelope.adsr0, v.envelope.adsr1, v.envelope.gain, brr
                         );
                     }
                 }

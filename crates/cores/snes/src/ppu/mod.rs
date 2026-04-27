@@ -1,13 +1,15 @@
 #![allow(static_mut_refs)]
 // Logging controls (runtime via env — see debug_flags)
 pub(crate) const IMPORTANT_WRITE_LIMIT: u32 = 10; // How many important writes to print
-use std::sync::OnceLock;
-
 mod palette;
 mod registers;
 mod rendering;
 mod sprites;
+mod timing;
 mod window;
+
+#[cfg(feature = "runtime-debug-flags")]
+use std::sync::OnceLock;
 
 fn disable_authoritative_superfx_bg1_source() -> bool {
     #[cfg(not(feature = "runtime-debug-flags"))]
@@ -736,25 +738,6 @@ impl Ppu {
         self.superfx_tile_mode = 0;
     }
 
-    #[inline]
-    fn force_display_active(&self) -> bool {
-        crate::debug_flags::force_display()
-    }
-
-    #[inline]
-    fn bg_interlace_active(&self) -> bool {
-        self.interlace && (self.bg_mode == 5 || self.bg_mode == 6)
-    }
-
-    fn bg_interlace_y(&self, y: u16) -> u16 {
-        if self.bg_interlace_active() {
-            y.saturating_mul(2)
-                .saturating_add(self.interlace_field as u16)
-        } else {
-            y
-        }
-    }
-
     // obj_interlace_active moved to sprites.rs
 
     // obj_line_for_scanline moved to sprites.rs
@@ -764,96 +747,6 @@ impl Ppu {
     // obj_sprite_height_lines moved to sprites.rs
 
     // obj_sprite_rel_y moved to sprites.rs
-
-    // --- Coarse NTSC timing helpers ---
-    #[inline]
-    fn first_visible_dot(&self) -> u16 {
-        // SNES visible area starts at H=22 (0..339).
-        22
-    }
-    #[inline]
-    fn dots_per_line(&self) -> u16 {
-        self.dots_per_scanline(self.scanline)
-    }
-    #[inline]
-    fn scanlines_per_frame(&self) -> u16 {
-        // NTSC timing:
-        // - non-interlace: 262 scanlines, but field=1 shortens V=240 to 340 dots
-        // - interlace: field=0 adds one extra scanline (263 total)
-        262 + u16::from(self.interlace && !self.interlace_field)
-    }
-    #[inline]
-    fn dots_per_scanline(&self, scanline: u16) -> u16 {
-        // NTSC color subcarrier alignment introduces one short scanline on field=1
-        // when interlace is disabled. We model that as a 340-dot V=240 scanline.
-        if !self.interlace && self.interlace_field && scanline == 240 {
-            340
-        } else {
-            341
-        }
-    }
-    #[inline]
-    fn first_hblank_dot(&self) -> u16 {
-        // Visible width is 256 pixels. Visible starts at H=22, so HBlank begins at 22+256=278.
-        self.first_visible_dot() + 256
-    }
-    #[inline]
-    fn last_dot_index(&self) -> u16 {
-        self.dots_per_line() - 1
-    }
-    #[inline]
-    fn last_scanline_index(&self) -> u16 {
-        self.scanlines_per_frame() - 1
-    }
-    #[inline]
-    fn remaining_dots_in_frame(&self) -> u32 {
-        let current_line_remaining = self.dots_per_line().saturating_sub(self.cycle) as u32;
-        let mut remaining = current_line_remaining;
-        let frame_lines = self.scanlines_per_frame();
-        let mut scanline = self.scanline.saturating_add(1);
-        while scanline < frame_lines {
-            remaining = remaining.saturating_add(self.dots_per_scanline(scanline) as u32);
-            scanline = scanline.saturating_add(1);
-        }
-        remaining
-    }
-    #[inline]
-    pub fn get_visible_height(&self) -> u16 {
-        // デバッグ用に表示高さを短くして早めにVBlankへ入れるオプション。
-        // 環境変数 PPU_VIS_HEIGHT を指定するとその値を使う（例: 200）。
-        static OVERRIDE: OnceLock<Option<u16>> = OnceLock::new();
-        let override_val = *OVERRIDE.get_or_init(|| {
-            std::env::var("PPU_VIS_HEIGHT")
-                .ok()
-                .and_then(|v| v.parse::<u16>().ok())
-                .filter(|v| *v >= 160 && *v <= 239)
-        });
-        if let Some(v) = override_val {
-            return v;
-        }
-
-        if self.overscan {
-            239
-        } else {
-            224
-        }
-    }
-
-    #[inline]
-    fn vblank_start_line(&self) -> u16 {
-        // VBlank begins one scanline after the last visible line.
-        self.get_visible_height().saturating_add(1)
-    }
-    #[inline]
-    #[allow(dead_code)]
-    fn fixed8_floor(val: i64) -> i32 {
-        // Floor division by 256 for signed 8.8 fixed
-        if val >= 0 {
-            (val >> 8) as i32
-        } else {
-            -(((-val + 255) >> 8) as i32)
-        }
-    }
 
     // sign_extend13 moved to registers.rs
 

@@ -7,6 +7,7 @@ mod hdma;
 mod io;
 mod mdma;
 mod sa1;
+mod timing;
 mod trace;
 
 use std::sync::{Arc, Mutex, OnceLock};
@@ -17,10 +18,7 @@ use crate::cartridge::mapper::MemoryMapper;
 use crate::cartridge::sa1::Sa1;
 use crate::savestate::BusSaveState;
 
-use debug::{
-    auto_press_a_frame, auto_press_a_stop_frame, auto_press_start_frame,
-    trace_cpu_sfx_ram_callers_enabled, trace_sram, trace_starfox_slow_profile_enabled,
-};
+use debug::{trace_cpu_sfx_ram_callers_enabled, trace_sram, trace_starfox_slow_profile_enabled};
 
 const CPU_EXEC_TRACE_RING_LEN: usize = 16;
 
@@ -543,15 +541,21 @@ impl Bus {
         matches!((poll_pc >> 16) as u8, 0x7E | 0x7F) && (poll_pc & 0xFFFF) == 0x4EFD
     }
 
-    fn starfox_apu_echo_wait_budget() -> usize {
+    fn apu_echo_wait_budget() -> usize {
         static VALUE: OnceLock<usize> = OnceLock::new();
         *VALUE.get_or_init(|| {
-            std::env::var("STARFOX_APU_ECHO_WAIT_BUDGET")
+            std::env::var("APU_ECHO_WAIT_BUDGET")
+                .or_else(|_| std::env::var("STARFOX_APU_ECHO_WAIT_BUDGET"))
                 .ok()
                 .and_then(|raw| raw.trim().parse::<usize>().ok())
                 .filter(|value| *value > 0)
                 .unwrap_or(4_096)
         })
+    }
+
+    fn apu_echo_wait_assist_disabled() -> bool {
+        static VALUE: OnceLock<bool> = OnceLock::new();
+        *VALUE.get_or_init(|| std::env::var_os("DISABLE_APU_ECHO_WAIT_ASSIST").is_some())
     }
 
     fn is_starfox_apu_echo_wait_pc(poll_pc: u32) -> bool {
@@ -2296,7 +2300,23 @@ impl Bus {
                                     {
                                         apu.run_until_cpu_port_matches_latch(
                                             0,
-                                            Self::starfox_apu_echo_wait_budget(),
+                                            Self::apu_echo_wait_budget(),
+                                        );
+                                        v = apu.read_port(p);
+                                    }
+                                    if offset == 0x2140
+                                        && self.mapper_type
+                                            != crate::cartridge::MapperType::SuperFx
+                                        && !Self::apu_echo_wait_assist_disabled()
+                                        && v != apu.port_latch[0]
+                                    {
+                                        // Many SPC loaders acknowledge each transfer byte by
+                                        // echoing APUIO0. If the CPU is already polling that
+                                        // echo, give the APU a bounded catch-up window so large
+                                        // sample uploads do not stretch across many video frames.
+                                        apu.run_until_cpu_port_matches_latch(
+                                            0,
+                                            Self::apu_echo_wait_budget(),
                                         );
                                         v = apu.read_port(p);
                                     }
@@ -3641,7 +3661,7 @@ impl Bus {
                                 if apu.read_port(0) != apu.port_latch[0] {
                                     apu.run_until_cpu_port_matches_latch(
                                         0,
-                                        Self::starfox_apu_echo_wait_budget(),
+                                        Self::apu_echo_wait_budget(),
                                     );
                                 }
                             }
@@ -4719,298 +4739,6 @@ impl Bus {
                 gsu.run_for_cpu_cycles(&*rom, cpu_cycles);
             }
         }
-    }
-
-    #[inline]
-    fn current_hirq_dot(&self, scanline: u16) -> Option<u16> {
-        let last_dot = self.ppu.dots_this_scanline(scanline).saturating_sub(1);
-        if self.h_timer > last_dot {
-            return None;
-        }
-        let h = self.h_timer.saturating_add(4);
-        (h <= last_dot).then_some(h)
-    }
-
-    #[inline]
-    fn htimer_condition_matches_current_dot(&self, scanline: u16, cycle: u16) -> bool {
-        self.current_hirq_dot(scanline)
-            .map(|h| cycle == h)
-            .unwrap_or(false)
-    }
-
-    // Re-check IRQ timer comparators when IRQ enables or timer registers are written mid-scanline.
-    // A newly written H compare should only fire immediately when it matches the current dot,
-    // not when that dot has already passed. V-only IRQs are edge-triggered at the scanline
-    // boundary in tick_timers(); treating the V comparator as a live level causes IRQ handlers
-    // that acknowledge TIMEUP and then restore $4200 on the same line to retrigger immediately.
-    fn recheck_irq_timer_match(&mut self) {
-        if !(self.irq_h_enabled || self.irq_v_enabled) {
-            return;
-        }
-
-        let line = self.ppu.get_scanline();
-        let cycle = self.ppu.get_cycle();
-        let v_match = line == self.v_timer;
-
-        match (self.irq_h_enabled, self.irq_v_enabled) {
-            (true, true) => {
-                self.irq_v_matched_line = if v_match { Some(line) } else { None };
-                if v_match && self.htimer_condition_matches_current_dot(line, cycle) {
-                    self.irq_pending = true;
-                }
-            }
-            (true, false) => {
-                self.irq_v_matched_line = None;
-                if self.htimer_condition_matches_current_dot(line, cycle) {
-                    self.irq_pending = true;
-                }
-            }
-            (false, true) => {
-                self.irq_v_matched_line = None;
-            }
-            _ => {}
-        }
-    }
-
-    // Called by emulator each time scanline advances; minimal V-timer IRQ
-    pub fn tick_timers(&mut self) {
-        // Called at scanline boundary (good moment to check V compare)
-        if !(self.irq_h_enabled || self.irq_v_enabled) {
-            return;
-        }
-        let line = self.ppu.get_scanline();
-        let v_match = line == self.v_timer;
-        if self.irq_v_enabled && !self.irq_h_enabled {
-            if v_match {
-                self.irq_pending = true;
-            }
-        } else if self.irq_h_enabled && self.irq_v_enabled {
-            // When both enabled, remember V matched line; H will be checked in tick_timers_hv
-            self.irq_v_matched_line = if v_match { Some(line) } else { None };
-        } else {
-            // Only H enabled: do nothing here; handled in tick_timers_hv
-        }
-    }
-
-    // Called after PPU step with old/new cycle to approximate H/V timer match
-    pub fn tick_timers_hv(&mut self, old_cycle: u16, new_cycle: u16, scanline: u16) {
-        if !(self.irq_h_enabled || self.irq_v_enabled) {
-            return;
-        }
-
-        let mut h_match = false;
-        if let Some(h) = self.current_hirq_dot(scanline) {
-            // Detect crossing of the H timer threshold within this PPU step.
-            if old_cycle <= new_cycle {
-                if old_cycle <= h && h < new_cycle {
-                    h_match = true;
-                }
-            } else if old_cycle <= h || h < new_cycle {
-                h_match = true;
-            }
-        }
-
-        match (self.irq_h_enabled, self.irq_v_enabled) {
-            (true, true) => {
-                // Require both V matched on this line and H crossing
-                if h_match {
-                    if let Some(vline) = self.irq_v_matched_line {
-                        if vline == scanline {
-                            self.irq_pending = true;
-                        }
-                    }
-                }
-            }
-            (true, false) => {
-                if h_match {
-                    self.irq_pending = true;
-                }
-            }
-            (false, true) => {
-                // V-IRQ only is handled at scanline boundary in tick_timers().
-            }
-            _ => {}
-        }
-    }
-
-    // Called when the PPU enters VBlank. Handles auto-joy if enabled.
-    pub fn on_vblank_start(&mut self) {
-        if (self.nmitimen & 0x01) != 0 {
-            // Auto-joypad read begins with a latch pulse (equivalent to writing 1->0 to $4016).
-            // This also prepares the manual serial read registers ($4016/$4017) for ROMs that
-            // read them after enabling auto-joypad without explicitly strobbing.
-            self.input_system.write_strobe(1);
-            self.input_system.write_strobe(0);
-
-            // Auto-joypad: emulate the hardware serial read (16 bits per pad).
-            // Manual serial order is B,Y,Select,Start,Up,Down,Left,Right,A,X,L,R,0,0,0,0
-            // and the hardware packs this MSB-first into JOYxH/JOYxL:
-            //   bit15..8 = B,Y,Select,Start,Up,Down,Left,Right
-            //   bit7..0  = A,X,L,R,0,0,0,0
-            let mt = self.input_system.is_multitap_enabled();
-            let mut b1: u16 = 0;
-            let mut b2: u16 = 0;
-            let mut b3: u16 = 0;
-            let mut b4: u16 = 0;
-            for i in 0..16 {
-                let bit_pos = 15 - i;
-                b1 |= ((self.input_system.read_controller1() & 1) as u16) << bit_pos;
-                b2 |= ((self.input_system.read_controller2() & 1) as u16) << bit_pos;
-                if mt {
-                    b3 |= ((self.input_system.read_controller3() & 1) as u16) << bit_pos;
-                    b4 |= ((self.input_system.read_controller4() & 1) as u16) << bit_pos;
-                }
-            }
-
-            // Packed 16-bit state is little-endian in memory:
-            // JOYxL ($4218/$421A/...) = low byte  (A,X,L,R,0,0,0,0)
-            // JOYxH ($4219/$421B/...) = high byte (B,Y,Select,Start,Up,Down,Left,Right)
-            self.joy_data[0] = (b1 & 0x00FF) as u8;
-            self.joy_data[1] = ((b1 >> 8) & 0x00FF) as u8;
-            self.joy_data[2] = (b2 & 0x00FF) as u8;
-            self.joy_data[3] = ((b2 >> 8) & 0x00FF) as u8;
-            self.joy_data[4] = (b3 & 0x00FF) as u8;
-            self.joy_data[5] = ((b3 >> 8) & 0x00FF) as u8;
-            self.joy_data[6] = (b4 & 0x00FF) as u8;
-            self.joy_data[7] = ((b4 >> 8) & 0x00FF) as u8;
-            // CPUテストROM専用（ヘッドレスのみ）:
-            // ラッチ値を「未押下」に固定し、$4218 の2回目読みでA押下を返す。
-            // ウィンドウ表示時はユーザー入力を優先する。
-            if self.cpu_test_mode && crate::debug_flags::headless() {
-                self.joy_data[0] = 0x00;
-                self.joy_data[1] = 0x00;
-            }
-            // Headless auto-press: inject buttons after N frames (for games that wait for input)
-            if crate::debug_flags::headless() {
-                let cur = self.ppu.get_frame();
-                if let Some(start_frame) = auto_press_a_frame() {
-                    let stop = auto_press_a_stop_frame().unwrap_or(u32::MAX);
-                    // Pulse A every 30 frames (press 2 frames, release 28) for edge-detect games
-                    let sf = start_frame as u64;
-                    if cur >= sf && cur < stop as u64 {
-                        let elapsed = cur - sf;
-                        if elapsed < 2 || (elapsed % 30) < 2 {
-                            // A button = bit7 of JOY1L ($4218)
-                            self.joy_data[0] |= 0x80;
-                        }
-                    }
-                }
-                if let Some(start_frame) = auto_press_start_frame() {
-                    // Press for 2 frames then release (edge-detect compatible)
-                    if cur >= start_frame as u64 && cur < (start_frame as u64) + 2 {
-                        // Start button = bit4 of JOY1H ($4219)
-                        self.joy_data[1] |= 0x10;
-                    }
-                }
-                // AUTO_PRESS_BUTTONS=HHHH: press buttons (hex mask) after AUTO_PRESS_A_STOP frame
-                // $4218: B Y Sel Sta Up Dn Lt Rt  $4219: A X L R 0 0 0 0
-                if let Ok(hex) = std::env::var("AUTO_PRESS_BUTTONS") {
-                    if let Ok(mask) = u16::from_str_radix(hex.trim_start_matches("0x"), 16) {
-                        let start = auto_press_a_stop_frame().unwrap_or(0) as u64;
-                        if cur >= start {
-                            self.joy_data[0] |= (mask & 0xFF) as u8;
-                            self.joy_data[1] |= ((mask >> 8) & 0xFF) as u8;
-                        }
-                    }
-                }
-            }
-            // Set JOYBUSY for a short duration (approximation).
-            // CPUテストHLE_FORCE中は BUSY=0（常に完了扱い）。
-            // CPUテストROMはVBlank直後に$4212を読むため少し長めに保持。
-            let mut busy = self.joy_busy_scanlines;
-            if self.cpu_test_mode && busy < 8 {
-                busy = 8;
-            }
-            self.joy_busy_counter = if crate::debug_flags::cpu_test_hle_force() {
-                0
-            } else if crate::debug_flags::cpu_test_hle() {
-                32
-            } else {
-                busy
-            };
-            if crate::debug_flags::trace_autojoy() {
-                println!(
-                    "[AUTOJOY] latched b1=0x{:04X} b2=0x{:04X} busy={} scanline={} cycle={}",
-                    b1,
-                    b2,
-                    self.joy_busy_counter,
-                    self.ppu.scanline,
-                    self.ppu.get_cycle()
-                );
-            }
-        }
-        // Strict timing: run deferred graphics DMA now
-        if self.pending_gdma_mask != 0 {
-            let mask = self.pending_gdma_mask;
-            self.pending_gdma_mask = 0;
-            for i in 0..8 {
-                if mask & (1 << i) != 0 {
-                    if !self.dma_controller.channels[i].configured {
-                        continue;
-                    }
-                    self.perform_dma_transfer(i);
-                }
-            }
-        }
-    }
-
-    // Called once per scanline to update JOYBUSY timing
-    pub fn on_scanline_advance(&mut self) {
-        if self.joy_busy_counter > 0 {
-            self.joy_busy_counter -= 1;
-        }
-        // Temporary: sample CPU PC during specific frames
-        if let Some((start, end)) = crate::debug_flags::trace_cpu_pc_range() {
-            let frame = self.ppu.get_frame();
-            let sl = self.ppu.scanline;
-            if frame >= start && frame <= end && sl == 100 {
-                eprintln!(
-                    "[CPU-PC] frame={} sl={} PC=0x{:06X} NMI_en={} INIDISP=0x{:02X}",
-                    frame, sl, self.last_cpu_pc, self.ppu.nmi_enabled, self.ppu.screen_display,
-                );
-            }
-        }
-    }
-
-    /// Extra master cycles consumed by DMA/other stalls since last call.
-    /// This is used by the main emulator loop to advance PPU/APU while the S-CPU is halted.
-    #[inline]
-    pub fn take_pending_stall_master_cycles(&mut self) -> u64 {
-        let v = self.pending_stall_master_cycles;
-        self.pending_stall_master_cycles = 0;
-        v
-    }
-
-    /// Extra master cycles from slow-memory access in the last CPU instruction.
-    /// Delivered to APU/PPU immediately (same iteration) rather than deferred.
-    #[inline]
-    pub fn take_last_instr_extra_master(&mut self) -> u64 {
-        let v = self.last_instr_extra_master;
-        self.last_instr_extra_master = 0;
-        v
-    }
-
-    #[inline]
-    fn add_pending_stall_master_cycles(&mut self, cycles: u64) {
-        self.pending_stall_master_cycles = self.pending_stall_master_cycles.saturating_add(cycles);
-    }
-
-    fn push_recent_cpu_exec_pc(&mut self, pc24: u32) {
-        if self
-            .recent_cpu_exec_pcs
-            .last()
-            .is_some_and(|&last| last == pc24)
-        {
-            return;
-        }
-        if self.recent_cpu_exec_pcs.len() >= CPU_EXEC_TRACE_RING_LEN {
-            self.recent_cpu_exec_pcs.remove(0);
-        }
-        self.recent_cpu_exec_pcs.push(pc24);
-    }
-
-    pub fn debug_recent_cpu_exec_pcs(&self) -> &[u32] {
-        &self.recent_cpu_exec_pcs
     }
 
     #[cfg(debug_assertions)]

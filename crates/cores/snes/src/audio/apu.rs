@@ -39,6 +39,7 @@ struct ApuConfig {
     fast_upload_bytes: u64,
     skip_boot: bool,
     fake_upload: bool,
+    loader_hle_enabled: bool,
     force_port0: Option<u8>,
     smw_apu_echo: bool,
     smw_apu_hle_handshake: bool,
@@ -61,6 +62,10 @@ impl ApuConfig {
             fast_upload_bytes: Self::read_u64_env("APU_FAST_BYTES", DEFAULT_FAST_UPLOAD_BYTES),
             skip_boot: Self::read_loose_bool_env("APU_SKIP_BOOT", false),
             fake_upload: Self::read_loose_bool_env("APU_FAKE_UPLOAD", false),
+            // Post-boot upload HLE bridges IPL-style loaders that are invoked
+            // by an already-running SPC program. It can be disabled for
+            // diagnostics when comparing against the real loader byte stream.
+            loader_hle_enabled: Self::read_loose_bool_env("APU_LOADER_HLE", true),
             force_port0: Self::read_u8_env("APU_FORCE_PORT0"),
             smw_apu_echo: Self::read_loose_bool_env("SMW_APU_ECHO", false),
             // SMW専用。既定では無効（他ROMへの副作用回避）
@@ -206,6 +211,12 @@ pub struct Apu {
     pending_idx: Option<u8>,
     pending_cmd: Option<u8>,
     data_ready: bool,
+    loader_hle_active: bool,
+    loader_hle_enabled: bool,
+    loader_hle_has_resume: bool,
+    loader_hle_resume_pc: u16,
+    loader_hle_resume_sp: u8,
+    loader_ready_stall_reads: u16,
     upload_done_count: u64,
     upload_bytes: u64,
     last_upload_idx: u8,
@@ -267,6 +278,12 @@ impl Apu {
             pending_idx: None,
             pending_cmd: None,
             data_ready: false,
+            loader_hle_active: false,
+            loader_hle_enabled: config.loader_hle_enabled,
+            loader_hle_has_resume: false,
+            loader_hle_resume_pc: 0,
+            loader_hle_resume_sp: 0,
+            loader_ready_stall_reads: 0,
             upload_done_count: 0,
             upload_bytes: 0,
             last_upload_idx: 0,
@@ -286,8 +303,12 @@ impl Apu {
         apu.refresh_trace_latches();
         if crate::debug_flags::trace_apu_bootstate() {
             println!(
-                "[APU-BOOTSTATE] init: boot_hle_enabled={} skip_boot={} fast_upload={} boot_state={:?}",
-                config.boot_hle_enabled, config.skip_boot, config.fast_upload, apu.boot_state
+                "[APU-BOOTSTATE] init: boot_hle_enabled={} loader_hle_enabled={} skip_boot={} fast_upload={} boot_state={:?}",
+                config.boot_hle_enabled,
+                config.loader_hle_enabled,
+                config.skip_boot,
+                config.fast_upload,
+                apu.boot_state
             );
         }
         if config.skip_boot {
@@ -314,6 +335,7 @@ impl Apu {
         self.fast_upload = config.fast_upload;
         self.fast_upload_bytes = config.fast_upload_bytes;
         self.skip_boot = config.skip_boot;
+        self.loader_hle_enabled = config.loader_hle_enabled;
         self.smw_apu_echo = config.smw_apu_echo;
         self.smw_apu_hle_handshake = config.smw_apu_hle_handshake;
         self.smw_apu_port_echo_strict = config.smw_apu_port_echo_strict;
@@ -336,6 +358,11 @@ impl Apu {
         self.pending_idx = None;
         self.pending_cmd = None;
         self.data_ready = false;
+        self.loader_hle_active = false;
+        self.loader_hle_has_resume = false;
+        self.loader_hle_resume_pc = 0;
+        self.loader_hle_resume_sp = 0;
+        self.loader_ready_stall_reads = 0;
         self.upload_done_count = 0;
         self.upload_bytes = 0;
         self.last_upload_idx = 0;
@@ -391,17 +418,21 @@ impl Apu {
 
         // CPU->APU ポート書き込みは SPC 実行前に反映する。
         self.flush_pending_port_writes();
-        if run > 0 {
-            self.total_smp_cycles = self.total_smp_cycles.saturating_add(run as u64);
+        if run > 0 && self.loader_hle_active {
+            self.advance_time_without_smp(run);
+        } else if run > 0 {
             // SPC700 のバッチ実行中にポート書き込み ($F4-$F7) が発生すると
             // run() が中断する。中間ポート値を S-CPU 側に反映してから再開し、
             // IPL 転送プロトコルのエコーが消失するレースを防ぐ。
             self.inner.port_written = false;
-            self.run_spc_interleaved(run);
-            // ポート書き込みで中断した場合、SMP の残サイクルをドロップする。
-            // 次の step() で cycle_count に残りが蓄積し、IPL echo + game driver reset
-            // が一括処理されるレースを防ぐ。
+            let executed = self.run_spc_interleaved(run);
+            self.total_smp_cycles = self.total_smp_cycles.saturating_add(executed.max(0) as u64);
+            // ポート書き込みで中断した場合、SMP 内部の残サイクルは捨てる。
+            // ただし elapsed time そのものは失わせず、APU 側の固定小数点
+            // accumulator に戻して次回以降に実行する。SMP cycle_count に残すと
+            // 次の同期でCPU時間以上に走り、ACK/command handshake を追い越してしまう。
             if self.inner.port_written {
+                self.defer_unexecuted_cycles(run, executed);
                 if let Some(smp) = self.inner.smp.as_mut() {
                     smp.cycle_count = 0;
                 }
@@ -444,10 +475,18 @@ impl Apu {
         // CPU停止中でもポート更新は先に反映しておく
         self.flush_pending_port_writes();
 
-        if run > 0 {
-            self.total_smp_cycles = self.total_smp_cycles.saturating_add(run as u64);
+        if run > 0 && self.loader_hle_active {
+            self.advance_time_without_smp(run);
+        } else if run > 0 {
             self.inner.port_written = false;
-            self.run_spc_interleaved(run);
+            let executed = self.run_spc_interleaved(run);
+            self.total_smp_cycles = self.total_smp_cycles.saturating_add(executed.max(0) as u64);
+            if self.inner.port_written {
+                self.defer_unexecuted_cycles(run, executed);
+                if let Some(smp) = self.inner.smp.as_mut() {
+                    smp.cycle_count = 0;
+                }
+            }
             if let Some(dsp) = self.inner.dsp.as_mut() {
                 dsp.flush();
             }
@@ -462,6 +501,28 @@ impl Apu {
         self.maybe_trace_apu_control();
         self.maybe_trace_out_ports();
         self.maybe_trace_smp_pc();
+    }
+
+    fn advance_time_without_smp(&mut self, cycles: i32) {
+        self.total_smp_cycles = self.total_smp_cycles.saturating_add(cycles as u64);
+        self.advance_dsp_time_without_smp(cycles);
+    }
+
+    fn advance_dsp_time_without_smp(&mut self, cycles: i32) {
+        self.inner.cpu_cycles_callback(cycles);
+        if let Some(dsp) = self.inner.dsp.as_mut() {
+            dsp.flush();
+        }
+    }
+
+    fn defer_unexecuted_cycles(&mut self, requested: i32, executed: i32) {
+        let unexecuted = requested.saturating_sub(executed.max(0));
+        if unexecuted <= 0 {
+            return;
+        }
+        self.cycle_accum_fixed = self
+            .cycle_accum_fixed
+            .saturating_add((unexecuted as u64) << 32);
     }
 
     /// SPC700 を実行し、ポート $F4-$F7 への書き込みが発生したら中断する。
@@ -611,8 +672,7 @@ impl Apu {
 
     /// Sync APU before CPU port write.
     ///
-    /// In Running state, avoid flushing tiny debts on every write to reduce
-    /// overhead while still keeping command latency bounded.
+    /// Keep adjacent multi-port writes atomic from the S-SMP side.
     #[inline]
     pub fn sync_for_port_write(&mut self) {
         // ポート書き込み時は pending writes のフラッシュのみ行う。
@@ -664,6 +724,10 @@ impl Apu {
         if self.cpu_visible_port_value(port) == target {
             return false;
         }
+        if self.loader_hle_active {
+            self.advance_time_without_smp(max_smp_cycles as i32);
+            return self.cpu_visible_port_value(port) == target;
+        }
 
         let mut remaining = max_smp_cycles as i32;
         while remaining > 0 {
@@ -682,6 +746,105 @@ impl Apu {
         }
 
         false
+    }
+
+    fn maybe_enter_loader_hle_from_ready_signature(&mut self, p: usize, visible: u8) -> u8 {
+        // Some SPC programs re-enter an IPL-style loader after they have already
+        // accepted a block byte. If the CPU is still polling for that byte's
+        // echo, bridge the rest of the APUIO upload into ARAM directly.
+        if p != 0
+            || self.boot_state != BootState::Running
+            || self.loader_hle_active
+            || !self.loader_hle_enabled
+            || self.apu_to_cpu_ports[0] != 0xAA
+            || self.apu_to_cpu_ports[1] != 0xBB
+            || self.port_latch[0] == 0xCC
+            || !self.is_spc_at_ipl_style_loader_ready()
+        {
+            self.loader_ready_stall_reads = 0;
+            return visible;
+        }
+
+        self.loader_ready_stall_reads = self.loader_ready_stall_reads.saturating_add(1);
+        if self.loader_ready_stall_reads < 1 {
+            return visible;
+        }
+
+        self.capture_loader_hle_resume();
+        if !self.loader_hle_has_resume {
+            return visible;
+        }
+
+        self.loader_hle_active = true;
+        self.boot_state = BootState::ReadySignature;
+        self.boot_port0_echo = 0xAA;
+        self.apu_to_cpu_ports[0] = 0xAA;
+        self.apu_to_cpu_ports[1] = 0xBB;
+        if crate::debug_flags::trace_apu_bootstate() {
+            println!(
+                "[APU-BOOTSTATE] loader HLE ready resume={} pc=${:04X} sp={:02X} latch=[{:02X} {:02X} {:02X} {:02X}]",
+                self.loader_hle_has_resume as u8,
+                self.loader_hle_resume_pc,
+                self.loader_hle_resume_sp,
+                self.port_latch[0],
+                self.port_latch[1],
+                self.port_latch[2],
+                self.port_latch[3]
+            );
+        }
+        self.expected_index = 0;
+        self.pending_idx = None;
+        self.pending_cmd = None;
+        self.data_ready = false;
+        visible
+    }
+
+    fn is_spc_at_ipl_style_loader_ready(&self) -> bool {
+        let Some(pc) = self.inner.smp.as_ref().map(|smp| smp.reg_pc) else {
+            return false;
+        };
+
+        // Detect a RAM copy of the standard IPL loader's AA/BB ready loop.
+        // The S-SMP may be in the compare or branch instruction when the S-CPU
+        // polls port0, so scan a small window ending at the current PC.
+        const READY_LOOP: [u8; 11] = [
+            0x8F, 0xAA, 0xF4, // MOV $F4,#$AA
+            0x8F, 0xBB, 0xF5, // MOV $F5,#$BB
+            0x78, 0xCC, 0xF4, // CMP $F4,#$CC
+            0xD0, 0xFB, // BNE back to CMP
+        ];
+
+        for back in 0..=16u16 {
+            let start = pc.wrapping_sub(back);
+            if start >= 0xFFC0 {
+                continue;
+            }
+            let matches = READY_LOOP.iter().enumerate().all(|(offset, &byte)| {
+                self.inner.peek_u8(start.wrapping_add(offset as u16)) == byte
+            });
+            if matches {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn capture_loader_hle_resume(&mut self) {
+        let Some(sp) = self.inner.smp.as_ref().map(|smp| smp.reg_sp) else {
+            self.loader_hle_has_resume = false;
+            self.loader_hle_resume_pc = 0;
+            self.loader_hle_resume_sp = 0;
+            return;
+        };
+
+        let lo_addr = 0x0100 | u16::from(sp.wrapping_add(1));
+        let hi_addr = 0x0100 | u16::from(sp.wrapping_add(2));
+        let lo = self.inner.peek_u8(lo_addr);
+        let hi = self.inner.peek_u8(hi_addr);
+        let pc = u16::from(lo) | (u16::from(hi) << 8);
+        self.loader_hle_has_resume = pc != 0 && pc < 0xFFC0;
+        self.loader_hle_resume_pc = pc;
+        self.loader_hle_resume_sp = sp.wrapping_add(2);
     }
 
     pub fn clear_audio_output_buffer(&mut self) {
@@ -713,7 +876,8 @@ impl Apu {
                 // sync() のインターリーブ実行で更新された apu_to_cpu_ports を返す。
                 // これにより SPC700 のバッチ実行中に書き込まれた中間値が
                 // S-CPU から見えるようになる。
-                let v = self.apu_to_cpu_ports[p];
+                let v =
+                    self.maybe_enter_loader_hle_from_ready_signature(p, self.apu_to_cpu_ports[p]);
                 if crate::debug_flags::trace_apu_port_once()
                     || crate::debug_flags::trace_apu_port_all()
                     || (p == 0 && crate::debug_flags::trace_apu_port0())
@@ -868,7 +1032,7 @@ impl Apu {
 
         self.maybe_trace_port_write(p, value);
 
-        if !self.boot_hle_enabled {
+        if !(self.boot_hle_enabled || self.loader_hle_active) {
             return;
         }
 
@@ -932,6 +1096,7 @@ impl Apu {
 
     fn enter_uploading_state(&mut self) {
         // HLEでもアップロード状態に入り、CPUのインデックスエコーを行う。
+        let was_loader_hle = self.loader_hle_active;
         self.boot_state = BootState::Uploading;
         if crate::debug_flags::trace_apu_bootstate() {
             println!("[APU-BOOTSTATE] -> Uploading (kick=0xCC)");
@@ -944,6 +1109,13 @@ impl Apu {
         self.pending_idx = None;
         self.pending_cmd = None;
         self.data_ready = false;
+        self.loader_hle_active = was_loader_hle;
+        if !was_loader_hle {
+            self.loader_hle_has_resume = false;
+            self.loader_hle_resume_pc = 0;
+            self.loader_hle_resume_sp = 0;
+        }
+        self.loader_ready_stall_reads = 0;
         self.upload_bytes = 0;
         self.last_upload_idx = 0;
         // fast_upload は Uploading 中の閾値判定で早期完了する。
@@ -1011,8 +1183,9 @@ impl Apu {
     fn write_upload_byte(&mut self, idx: u8, data: u8) {
         self.data_ready = false;
         self.pending_idx = None;
-        let addr = self.upload_addr.wrapping_add(idx as u16);
+        let addr = self.upload_addr;
         self.inner.write_u8(addr as u32, data);
+        self.upload_addr = self.upload_addr.wrapping_add(1);
         self.upload_bytes = self.upload_bytes.saturating_add(1);
         self.last_upload_idx = idx;
         self.expected_index = self.expected_index.wrapping_add(1);
@@ -1168,6 +1341,11 @@ impl Apu {
         st.pending_idx = self.pending_idx;
         st.pending_cmd = self.pending_cmd;
         st.data_ready = self.data_ready;
+        st.loader_hle_active = self.loader_hle_active;
+        st.loader_hle_has_resume = self.loader_hle_has_resume;
+        st.loader_hle_resume_pc = self.loader_hle_resume_pc;
+        st.loader_hle_resume_sp = self.loader_hle_resume_sp;
+        st.loader_ready_stall_reads = self.loader_ready_stall_reads;
         st.upload_done_count = self.upload_done_count;
         st.upload_bytes = self.upload_bytes;
         st.last_upload_idx = self.last_upload_idx;
@@ -1272,6 +1450,11 @@ impl Apu {
         self.pending_idx = st.pending_idx;
         self.pending_cmd = st.pending_cmd;
         self.data_ready = st.data_ready;
+        self.loader_hle_active = st.loader_hle_active;
+        self.loader_hle_has_resume = st.loader_hle_has_resume;
+        self.loader_hle_resume_pc = st.loader_hle_resume_pc;
+        self.loader_hle_resume_sp = st.loader_hle_resume_sp;
+        self.loader_ready_stall_reads = st.loader_ready_stall_reads;
         self.upload_done_count = st.upload_done_count;
         self.upload_bytes = st.upload_bytes;
         self.last_upload_idx = st.last_upload_idx;
@@ -1380,6 +1563,11 @@ impl Apu {
         self.port_latch = [0; 4];
         self.boot_port0_echo = 0xAA;
         self.boot_state = BootState::Running;
+        self.loader_hle_active = false;
+        self.loader_hle_has_resume = false;
+        self.loader_hle_resume_pc = 0;
+        self.loader_hle_resume_sp = 0;
+        self.loader_ready_stall_reads = 0;
         if crate::debug_flags::trace_apu_bootstate() {
             println!(
                 "[APU-BOOTSTATE] load_and_start -> Running (base=${:04X} start_pc=${:04X} len={})",
@@ -1398,7 +1586,10 @@ impl Apu {
     }
 
     fn finish_upload_and_start_with_ack(&mut self, ack: u8) {
+        let was_loader_hle = self.loader_hle_active;
         self.boot_state = BootState::Running;
+        self.loader_hle_active = false;
+        self.loader_ready_stall_reads = 0;
         if crate::debug_flags::trace_apu_bootstate() {
             println!(
                 "[APU-BOOTSTATE] finish_upload_and_start ack={:02X} addr=${:04X}",
@@ -1417,6 +1608,31 @@ impl Apu {
                 self.upload_done_count, self.upload_addr, self.upload_addr
             );
         }
+
+        if was_loader_hle {
+            self.pending_port_writes.clear();
+            for p in 0..4 {
+                self.inner.cpu_write_port(p as u8, self.port_latch[p]);
+            }
+            if self.loader_hle_has_resume {
+                if let Some(smp) = self.inner.smp.as_mut() {
+                    smp.reg_pc = self.loader_hle_resume_pc;
+                    smp.reg_sp = self.loader_hle_resume_sp;
+                    smp.is_stopped = false;
+                    smp.is_sleeping = false;
+                    smp.cycle_count = 0;
+                }
+            }
+            self.loader_hle_has_resume = false;
+            self.loader_hle_resume_pc = 0;
+            self.loader_hle_resume_sp = 0;
+            self.inner.write_u8(0x00F4, ack);
+            for i in 0..4 {
+                self.apu_to_cpu_ports[i] = self.inner.cpu_read_port(i as u8);
+            }
+            return;
+        }
+
         // IPL ROM を無効化
         self.inner.write_u8(0x00F1, 0x00);
         // ジャンプ先をセット（IPLがジャンプする直前の初期レジスタ状態に寄せる）

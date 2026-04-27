@@ -551,13 +551,19 @@ impl Apu {
                             || (reg & 0x0F) == 0x00  // VxVOLL
                             || (reg & 0x0F) == 0x01  // VxVOLR
                             || (reg & 0x0F) == 0x02  // VxPITCHL
-                            || (reg & 0x0F) == 0x03; // VxPITCHH
+                            || (reg & 0x0F) == 0x03  // VxPITCHH
+                            || (reg & 0x0F) == 0x05  // VxADSR0
+                            || (reg & 0x0F) == 0x06  // VxADSR1
+                            || (reg & 0x0F) == 0x07; // VxGAIN
                         if is_interesting {
                             use std::sync::atomic::{AtomicU32, Ordering};
                             static DSP_W_CNT: AtomicU32 = AtomicU32::new(0);
                             let n = DSP_W_CNT.fetch_add(1, Ordering::Relaxed);
-                            if n < 5000 {
-                                let pc = self.smp.as_ref().map(|s| s.reg_pc).unwrap_or(0);
+                            let pc = self.smp.as_ref().map(|s| s.reg_pc).unwrap_or(0);
+                            let noisy_reset_write = pc == 0x040F
+                                && matches!(reg, 0x4C | 0x5C | 0x6C)
+                                && matches!((reg, value), (0x4C | 0x5C, 0x00) | (0x6C, 0x20));
+                            if n < 5000 && !noisy_reset_write {
                                 let name = match reg {
                                     0x4C => "KON",
                                     0x5C => "KOFF",
@@ -569,6 +575,9 @@ impl Apu {
                                     _ if (reg & 0x0F) == 0x01 => "VOLR",
                                     _ if (reg & 0x0F) == 0x02 => "PITCHL",
                                     _ if (reg & 0x0F) == 0x03 => "PITCHH",
+                                    _ if (reg & 0x0F) == 0x05 => "ADSR0",
+                                    _ if (reg & 0x0F) == 0x06 => "ADSR1",
+                                    _ if (reg & 0x0F) == 0x07 => "GAIN",
                                     _ => "?",
                                 };
                                 let voice = (reg >> 4) & 0x07;

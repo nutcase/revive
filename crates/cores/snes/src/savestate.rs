@@ -384,6 +384,16 @@ pub struct ApuSaveState {
     #[serde(default)]
     pub data_ready: bool,
     #[serde(default)]
+    pub loader_hle_active: bool,
+    #[serde(default)]
+    pub loader_hle_has_resume: bool,
+    #[serde(default)]
+    pub loader_hle_resume_pc: u16,
+    #[serde(default)]
+    pub loader_hle_resume_sp: u8,
+    #[serde(default)]
+    pub loader_ready_stall_reads: u16,
+    #[serde(default)]
     pub upload_done_count: u64,
     #[serde(default)]
     pub upload_bytes: u64,

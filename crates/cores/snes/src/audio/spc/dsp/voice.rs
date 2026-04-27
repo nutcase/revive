@@ -241,10 +241,12 @@ impl Voice {
         sample = ((sample * env_level) >> 11) & !1;
         self.outx = ((sample as i16) >> 8) as u8;
 
-        if self.brr_block_decoder.is_end && !self.brr_block_decoder.is_looping {
-            self.envelope.key_off();
-            self.envelope.level = 0;
+        if self.brr_block_decoder.is_end {
             self.dsp().set_endx_bit(self.index);
+            if !self.brr_block_decoder.is_looping {
+                self.envelope.key_off();
+                self.envelope.level = 0;
+            }
         }
 
         self.sample_pos += pitch;

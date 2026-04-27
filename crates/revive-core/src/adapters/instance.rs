@@ -25,6 +25,14 @@ pub enum CoreInstance {
 
 impl CoreInstance {
     pub fn load_rom(path: &Path, system: Option<SystemKind>) -> Result<Self> {
+        Self::load_rom_with_audio(path, system, true)
+    }
+
+    pub fn load_rom_with_audio(
+        path: &Path,
+        system: Option<SystemKind>,
+        audio_enabled: bool,
+    ) -> Result<Self> {
         let system = match system {
             Some(system) => system,
             None => detect_system(path)?,
@@ -32,9 +40,8 @@ impl CoreInstance {
 
         match system {
             SystemKind::Nes => NesAdapter::load(path).map(Self::Nes),
-            SystemKind::Snes => {
-                SnesAdapter::load(path).map(|adapter| Self::Snes(Box::new(adapter)))
-            }
+            SystemKind::Snes => SnesAdapter::load_with_audio(path, audio_enabled)
+                .map(|adapter| Self::Snes(Box::new(adapter))),
             SystemKind::Sg1000 => Sg1000Adapter::load(path).map(Self::Sg1000),
             SystemKind::MasterSystem => MasterSystemAdapter::load(path).map(Self::MasterSystem),
             SystemKind::MegaDrive => MegaDriveAdapter::load(path).map(Self::MegaDrive),
