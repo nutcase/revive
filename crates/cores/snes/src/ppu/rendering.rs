@@ -1,22 +1,10 @@
 use super::{trace_sample_dot_config, BgMapCache, BgRowCache, Ppu};
-use std::sync::OnceLock;
 use wide::u32x8;
 
 mod superfx_direct;
+mod trace;
 
-fn env_presence_flag(name: &'static str) -> bool {
-    if cfg!(test) {
-        return std::env::var_os(name).is_some();
-    }
-
-    match name {
-        "BYPASS_OPT" => {
-            static VALUE: OnceLock<bool> = OnceLock::new();
-            *VALUE.get_or_init(|| std::env::var_os("BYPASS_OPT").is_some())
-        }
-        _ => std::env::var_os(name).is_some(),
-    }
-}
+use self::trace::env_presence_flag;
 
 impl Ppu {
     #[allow(dead_code)]
