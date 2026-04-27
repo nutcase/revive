@@ -1,7 +1,112 @@
 use super::{Bus, CPU_EXEC_TRACE_RING_LEN};
-use crate::bus::debug::{auto_press_a_frame, auto_press_a_stop_frame, auto_press_start_frame};
+use crate::bus::debug::{
+    auto_press_a_frame, auto_press_a_stop_frame, auto_press_start_frame,
+    trace_starfox_slow_profile_enabled,
+};
+use std::time::Instant;
 
 impl Bus {
+    #[inline]
+    pub(super) fn on_cpu_bus_cycle(&mut self) {
+        if !self.cpu_instr_active || self.dma_in_progress {
+            return;
+        }
+        let profile_enabled = trace_starfox_slow_profile_enabled();
+        let profile_start = profile_enabled.then(Instant::now);
+        self.cpu_instr_bus_cycles = self.cpu_instr_bus_cycles.saturating_add(1);
+        let extra = self.cpu_access_extra_master_cycles(self.last_cpu_bus_addr);
+        self.cpu_instr_extra_master_cycles =
+            self.cpu_instr_extra_master_cycles.saturating_add(extra);
+        self.tick_cpu_cycles(1);
+        if let Some(start) = profile_start {
+            self.cpu_profile_bus_cycle_ns = self
+                .cpu_profile_bus_cycle_ns
+                .saturating_add(start.elapsed().as_nanos() as u64);
+            self.cpu_profile_bus_cycle_count = self.cpu_profile_bus_cycle_count.saturating_add(1);
+        }
+    }
+
+    #[inline]
+    pub(super) fn take_apu_inline_cpu_cycles_for_current_access(&mut self) -> u8 {
+        if !self.cpu_instr_active || self.dma_in_progress {
+            return 0;
+        }
+        let elapsed = self.cpu_instr_bus_cycles.saturating_add(1);
+        let delta = elapsed.saturating_sub(self.cpu_instr_apu_synced_bus_cycles);
+        if delta != 0 {
+            self.cpu_instr_apu_synced_bus_cycles = elapsed;
+        }
+        delta
+    }
+
+    #[inline]
+    pub(super) fn cpu_instr_elapsed_master_cycles(&self) -> u64 {
+        (self.cpu_instr_bus_cycles as u64) * 6 + self.cpu_instr_extra_master_cycles
+    }
+
+    #[inline]
+    fn is_wram_address(&self, addr: u32) -> bool {
+        let bank = ((addr >> 16) & 0xFF) as u8;
+        let off = (addr & 0xFFFF) as u16;
+        // WRAM direct: $7E:0000-$7F:FFFF
+        if (0x7E..=0x7F).contains(&bank) {
+            return true;
+        }
+        // WRAM mirror: $00-$3F/$80-$BF:0000-1FFF
+        ((0x00..=0x3F).contains(&bank) || (0x80..=0xBF).contains(&bank)) && off < 0x2000
+    }
+
+    #[inline]
+    pub(super) fn cpu_access_master_cycles(&self, addr: u32) -> u8 {
+        // Reference: https://snes.nesdev.org/wiki/Timing
+        let bank = ((addr >> 16) & 0xFF) as u8;
+        let off = (addr & 0xFFFF) as u16;
+
+        // JOYSER0/1: always 12 master clocks
+        if ((0x00..=0x3F).contains(&bank) || (0x80..=0xBF).contains(&bank))
+            && matches!(off, 0x4016 | 0x4017)
+        {
+            return 12;
+        }
+
+        // Most MMIO: 6 master clocks
+        if ((0x00..=0x3F).contains(&bank) || (0x80..=0xBF).contains(&bank))
+            && matches!(
+                off,
+                0x2100..=0x21FF | 0x4000..=0x41FF | 0x4200..=0x421F | 0x4300..=0x437F
+            )
+        {
+            return 6;
+        }
+
+        // Internal WRAM: 8 master clocks
+        if self.is_wram_address(addr) {
+            return 8;
+        }
+
+        // ROM: 6 master clocks for FastROM ($80:0000+ with MEMSEL=1), otherwise 8.
+        if self.is_rom_address(addr) {
+            let fast = self.fastrom && (addr & 0x80_0000) != 0;
+            return if fast { 6 } else { 8 };
+        }
+
+        // Default to 8 (safe/slow) for SRAM/unknown regions.
+        8
+    }
+
+    #[inline]
+    fn cpu_access_extra_master_cycles(&self, addr: u32) -> u64 {
+        let mc = self.cpu_access_master_cycles(addr);
+        mc.saturating_sub(6) as u64
+    }
+
+    #[inline]
+    pub(super) fn add16_in_bank(addr: u32, delta: u32) -> u32 {
+        let bank = addr & 0x00FF_0000;
+        let lo = (addr & 0x0000_FFFF).wrapping_add(delta) & 0x0000_FFFF; // allow wrapping within 16-bit
+        bank | lo
+    }
+
     #[inline]
     fn current_hirq_dot(&self, scanline: u16) -> Option<u16> {
         let last_dot = self.ppu.dots_this_scanline(scanline).saturating_sub(1);
