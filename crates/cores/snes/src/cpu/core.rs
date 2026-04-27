@@ -4,7 +4,13 @@
 //! This module provides the complete 65C816 instruction set execution
 //! that can be used by both S-CPU and SA-1 through bus abstraction.
 
-use crate::{cpu::bus::CpuBus, cpu::StatusFlags, debug_flags};
+mod fetch;
+mod interrupt;
+
+pub use fetch::{fetch_opcode, fetch_opcode_generic};
+pub use interrupt::{service_irq, service_nmi};
+
+use crate::{cpu::bus::CpuBus, cpu::StatusFlags};
 
 #[derive(Debug, Clone)]
 pub struct FetchResult {
@@ -728,61 +734,6 @@ mod tests {
         let st = core.state();
         assert_eq!(st.a & 0x00FF, 0x42);
         assert_eq!(st.sp, sp_start);
-    }
-}
-
-pub fn fetch_opcode(state: &mut CoreState, bus: &mut crate::bus::Bus) -> FetchResult {
-    let pc_before = state.pc;
-    let full_addr = full_address(state, pc_before);
-    let opcode = apply_opcode_compat_patch(full_addr, bus.read_u8(full_addr));
-    let mut memspeed_penalty = 0;
-    if debug_flags::mem_timing() && bus.is_rom_address(full_addr) && !bus.is_fastrom() {
-        memspeed_penalty = 2;
-    }
-    state.pc = state.pc.wrapping_add(1);
-    FetchResult {
-        opcode,
-        memspeed_penalty,
-        pc_before,
-        full_addr,
-    }
-}
-
-// Generic version for SA-1 using CpuBus trait
-pub fn fetch_opcode_generic<T: crate::cpu::bus::CpuBus>(
-    state: &mut CoreState,
-    bus: &mut T,
-) -> FetchResult {
-    let pc_before = state.pc;
-    let full_addr = full_address(state, pc_before);
-    let opcode = apply_opcode_compat_patch(full_addr, bus.read_u8(full_addr));
-    let memspeed_penalty = bus.opcode_memory_penalty(full_addr);
-    if crate::debug_flags::debug_fetch_pc()
-        && state.pb == 0x00
-        && state.pc >= 0x8240
-        && state.pc <= 0x8270
-    {
-        println!(
-            "[FETCH] PB={:02X} PC={:04X} OPCODE={:02X}",
-            state.pb, state.pc, opcode
-        );
-    }
-    state.pc = state.pc.wrapping_add(1);
-    FetchResult {
-        opcode,
-        memspeed_penalty,
-        pc_before,
-        full_addr,
-    }
-}
-
-#[inline(always)]
-fn apply_opcode_compat_patch(full_addr: u32, opcode: u8) -> u8 {
-    // Optional ROM-specific compat hook kept behind an explicit flag.
-    if crate::debug_flags::jmp8cbe_to_jsr() && full_addr == 0x008CBE {
-        0x20 // JSR absolute
-    } else {
-        opcode
     }
 }
 
@@ -6067,99 +6018,5 @@ pub fn execute_instruction_generic<T: CpuBus>(
             add_cycles(state, 2);
             2
         }
-    }
-}
-
-pub fn service_nmi<T: CpuBus>(state: &mut CoreState, bus: &mut T) -> u8 {
-    let before = state.cycles;
-    if crate::debug_flags::trace_nmi_take() {
-        println!(
-            "[TRACE_NMI_TAKE] at {:02X}:{:04X} A={:04X} X={:04X} Y={:04X} SP={:04X} D={:04X} DB={:02X} P={:02X}",
-            state.pb,
-            state.pc,
-            state.a,
-            state.x,
-            state.y,
-            state.sp,
-            state.dp,
-            state.db,
-            state.p.bits()
-        );
-    }
-    if state.emulation_mode {
-        // Emulation mode: PCH, PCL, then status (bit5 forced 1, B cleared)
-        push_u8_generic(state, bus, (state.pc >> 8) as u8);
-        push_u8_generic(state, bus, (state.pc & 0xFF) as u8);
-        push_u8_generic(state, bus, (state.p.bits() | 0x20) & !0x10);
-        let vector = bus.read_u16(0x00FFFA);
-        state.pc = vector;
-        state.pb = 0;
-    } else {
-        // Native mode: PB, PCH, PCL, then status (bits 4/5 are X/M)
-        push_u8_generic(state, bus, state.pb);
-        push_u8_generic(state, bus, (state.pc >> 8) as u8);
-        push_u8_generic(state, bus, (state.pc & 0xFF) as u8);
-        push_u8_generic(state, bus, state.p.bits());
-        let vector = bus.read_u16(0x00FFEA);
-        state.pc = vector;
-        state.pb = 0;
-    }
-
-    state.p.insert(StatusFlags::IRQ_DISABLE);
-    state.p.remove(StatusFlags::DECIMAL);
-    state.waiting_for_irq = false;
-    bus.acknowledge_nmi();
-
-    let consumed = state.cycles.wrapping_sub(before) as u8;
-    let target = if state.emulation_mode { 7u8 } else { 8u8 };
-    if consumed < target {
-        add_cycles(state, target - consumed);
-        target
-    } else {
-        consumed
-    }
-}
-
-pub fn service_irq<T: CpuBus>(state: &mut CoreState, bus: &mut T) -> u8 {
-    let before = state.cycles;
-    if state.emulation_mode {
-        push_u8_generic(state, bus, (state.pc >> 8) as u8);
-        push_u8_generic(state, bus, (state.pc & 0xFF) as u8);
-        push_u8_generic(state, bus, (state.p.bits() | 0x20) & !0x10);
-        let vector = bus.read_u16(0x00FFFE);
-        state.pc = vector;
-        state.pb = 0;
-    } else {
-        push_u8_generic(state, bus, state.pb);
-        push_u8_generic(state, bus, (state.pc >> 8) as u8);
-        push_u8_generic(state, bus, (state.pc & 0xFF) as u8);
-        push_u8_generic(state, bus, state.p.bits());
-        let vector = bus.read_u16(0x00FFEE);
-        state.pc = vector;
-        state.pb = 0;
-    }
-
-    state.p.insert(StatusFlags::IRQ_DISABLE);
-    state.p.remove(StatusFlags::DECIMAL);
-    state.waiting_for_irq = false;
-
-    if crate::debug_flags::trace_irq() {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static PRINT_COUNT: AtomicU32 = AtomicU32::new(0);
-        if PRINT_COUNT.fetch_add(1, Ordering::Relaxed) < 16 {
-            println!(
-                "IRQ serviced → next PC {:02X}:{:04X} (emulation={})",
-                state.pb, state.pc, state.emulation_mode
-            );
-        }
-    }
-
-    let consumed = state.cycles.wrapping_sub(before) as u8;
-    let target = if state.emulation_mode { 7u8 } else { 8u8 };
-    if consumed < target {
-        add_cycles(state, target - consumed);
-        target
-    } else {
-        consumed
     }
 }
