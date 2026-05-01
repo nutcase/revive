@@ -1,4 +1,4 @@
-use super::{add_cycles, push_u8_generic, CoreState};
+use super::{add_cycles, stack::push_u8_generic, CoreState};
 use crate::{cpu::bus::CpuBus, cpu::StatusFlags};
 
 pub fn service_nmi<T: CpuBus>(state: &mut CoreState, bus: &mut T) -> u8 {
