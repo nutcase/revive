@@ -1,4 +1,4 @@
-use super::{read_u16_generic, read_u24_generic, read_u8_generic};
+use super::memory::{read_u16_generic, read_u24_generic, read_u8_generic};
 use crate::{cpu::bus::CpuBus, cpu::core::CoreState};
 
 #[inline(always)]

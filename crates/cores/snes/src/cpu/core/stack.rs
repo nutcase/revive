@@ -1,4 +1,4 @@
-use super::add_cycles;
+use super::memory::add_cycles;
 use crate::{cpu::bus::CpuBus, cpu::core::CoreState};
 
 #[inline(always)]

@@ -1,4 +1,7 @@
-use super::{set_flags_nz_16, set_flags_nz_8, CoreState};
+use super::{
+    flags::{set_flags_nz_16, set_flags_nz_8},
+    CoreState,
+};
 use crate::{cpu::bus::CpuBus, cpu::StatusFlags};
 
 #[inline]
