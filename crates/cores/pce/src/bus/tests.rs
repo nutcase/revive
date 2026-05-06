@@ -229,6 +229,19 @@ fn io_registers_round_trip_and_reset() {
 }
 
 #[test]
+fn cpu_control_register_mirrors_decode_by_low_byte() {
+    let mut bus = Bus::new();
+
+    bus.write_io(HW_CPU_CTRL_BASE + 0x112, 0xFF);
+    let irq_mask = IRQ_DISABLE_IRQ2 | IRQ_DISABLE_IRQ1 | IRQ_DISABLE_TIMER;
+    assert_eq!(bus.read_io(HW_CPU_CTRL_BASE + 0x012), irq_mask);
+    assert_eq!(bus.read_io(HW_CPU_CTRL_BASE + 0x112), irq_mask);
+
+    bus.write_io(HW_CPU_CTRL_BASE + 0x140, 0xAB);
+    assert_eq!(bus.read_io(HW_CPU_CTRL_BASE + 0x140), 0xAB);
+}
+
+#[test]
 fn timer_borrow_sets_request_bit() {
     let mut bus = Bus::new();
     bus.set_mpr(0, 0xFF);

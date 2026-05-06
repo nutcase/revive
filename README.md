@@ -145,6 +145,9 @@ Common controls:
 - Windows/Linux: `Ctrl + 1..9` loads state slots 1..9
 - Windows/Linux: `Ctrl + Shift + 1..9` saves state slots 1..9
 
+State slots are unavailable for Game Boy / Game Boy Color until that core
+exposes save-state serialization.
+
 NES:
 
 - Arrow keys: D-pad
@@ -273,10 +276,12 @@ Main region IDs:
 - Master System: `wram`, `cart_ram`, `vram`
 - Mega Drive: `wram`
 - PC Engine: `wram`, `cart_ram`, `bram`
-- Game Boy / Game Boy Color: `cart_ram`
-- Game Boy Advance: cheat target memory is not currently exposed by the core API
+- Game Boy: `wram`, `vram`, `oam`, `hram`, `cart_ram`
+- Game Boy Color: `wram`, `vram`, `oam`, `hram`, `cart_ram`
+- Game Boy Advance: `ewram`, `iwram`, `pram`, `vram`, `oam`
 
-Game Boy / Game Boy Color `cart_ram` is currently read-only through the core API.
+Game Boy / Game Boy Color `cart_ram` appears only when the cartridge exposes
+backup RAM.
 
 ## Save States
 

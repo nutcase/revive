@@ -3,6 +3,9 @@ use std::path::Path;
 use crate::paths::{readable_state_path, state_path};
 use crate::system::{AudioSpec, Result, SystemKind};
 
+#[cfg(not(target_endian = "little"))]
+compile_error!("Revive frame byte views require a little-endian target");
+
 pub(crate) fn write_byte(memory: &mut [u8], offset: usize, value: u8) -> bool {
     if let Some(slot) = memory.get_mut(offset) {
         *slot = value;
@@ -13,7 +16,6 @@ pub(crate) fn write_byte(memory: &mut [u8], offset: usize, value: u8) -> bool {
 }
 
 pub(crate) fn argb8888_u32_frame_as_bgra8888_bytes(frame: &[u32]) -> &[u8] {
-    debug_assert!(cfg!(target_endian = "little"));
     unsafe { std::slice::from_raw_parts(frame.as_ptr() as *const u8, std::mem::size_of_val(frame)) }
 }
 

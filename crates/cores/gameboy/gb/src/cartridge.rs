@@ -151,6 +151,14 @@ impl GbCartridge {
         }
     }
 
+    pub fn ram_data_mut(&mut self) -> Option<&mut [u8]> {
+        if self.ram.is_empty() {
+            None
+        } else {
+            Some(&mut self.ram)
+        }
+    }
+
     pub fn load_ram_data(&mut self, data: &[u8]) {
         if self.ram.is_empty() {
             return;

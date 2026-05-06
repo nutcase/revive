@@ -66,8 +66,44 @@ impl GbEmulator {
         self.bus.cartridge_ram_data()
     }
 
+    pub fn backup_data_mut(&mut self) -> Option<&mut [u8]> {
+        self.bus.cartridge_ram_data_mut()
+    }
+
     pub fn has_backup(&self) -> bool {
         self.bus.cartridge_ram_data().is_some()
+    }
+
+    pub fn work_ram(&self) -> &[u8] {
+        self.bus.work_ram()
+    }
+
+    pub fn work_ram_mut(&mut self) -> &mut [u8] {
+        self.bus.work_ram_mut()
+    }
+
+    pub fn video_ram(&self) -> &[u8] {
+        self.bus.video_ram()
+    }
+
+    pub fn video_ram_mut(&mut self) -> &mut [u8] {
+        self.bus.video_ram_mut()
+    }
+
+    pub fn oam(&self) -> &[u8] {
+        self.bus.oam()
+    }
+
+    pub fn oam_mut(&mut self) -> &mut [u8] {
+        self.bus.oam_mut()
+    }
+
+    pub fn high_ram(&self) -> &[u8] {
+        self.bus.high_ram()
+    }
+
+    pub fn high_ram_mut(&mut self) -> &mut [u8] {
+        self.bus.high_ram_mut()
     }
 
     pub fn debug_read8(&self, addr: u16) -> u8 {

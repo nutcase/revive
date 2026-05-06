@@ -297,10 +297,7 @@ impl Bus {
             }
             0x1C00..=0x1FFF => {
                 // Treat as additional mirror for control/TIMER/IRQ/PSG status
-                if (offset & 0x3F) >= 0x40 && (offset & 0x3F) <= 0x43 {
-                    // Mirror of VCE control area? leave as IO
-                    self.io[offset] = value;
-                } else if !self.write_control_register(offset, value) {
+                if !self.write_control_register(offset, value) {
                     self.io[offset] = value;
                 }
             }

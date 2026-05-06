@@ -608,6 +608,38 @@ impl GbBus {
         self.apu.audio_sample_rate_hz()
     }
 
+    pub fn work_ram(&self) -> &[u8] {
+        &self.wram
+    }
+
+    pub fn work_ram_mut(&mut self) -> &mut [u8] {
+        &mut self.wram
+    }
+
+    pub fn video_ram(&self) -> &[u8] {
+        &self.vram
+    }
+
+    pub fn video_ram_mut(&mut self) -> &mut [u8] {
+        &mut self.vram
+    }
+
+    pub fn oam(&self) -> &[u8] {
+        &self.oam
+    }
+
+    pub fn oam_mut(&mut self) -> &mut [u8] {
+        &mut self.oam
+    }
+
+    pub fn high_ram(&self) -> &[u8] {
+        &self.hram
+    }
+
+    pub fn high_ram_mut(&mut self) -> &mut [u8] {
+        &mut self.hram
+    }
+
     pub fn load_cartridge_ram(&mut self, data: &[u8]) {
         if let Some(cartridge) = self.cartridge.as_mut() {
             cartridge.load_ram_data(data);
@@ -618,6 +650,12 @@ impl GbBus {
         self.cartridge
             .as_ref()
             .and_then(|cartridge| cartridge.ram_data())
+    }
+
+    pub fn cartridge_ram_data_mut(&mut self) -> Option<&mut [u8]> {
+        self.cartridge
+            .as_mut()
+            .and_then(|cartridge| cartridge.ram_data_mut())
     }
 
     fn read_joyp(&self) -> u8 {

@@ -66,7 +66,7 @@ pub(crate) fn print_session_banner(core: &CoreInstance, rom_path: &Path, cheat_p
             region.id, region.label, region.len
         );
     }
-    println!("State keys  : {}", state_key_help());
+    println!("State keys  : {}", state_key_help(core.system()));
     println!("Controls    : arrows move, Enter start, Shift/Backspace select");
     println!("Cheat panel : Tab toggle");
 }

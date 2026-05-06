@@ -239,6 +239,46 @@ impl GbaEmulator {
         self.bus.load_backup_data(data);
     }
 
+    pub fn ewram(&self) -> &[u8] {
+        self.bus.ewram()
+    }
+
+    pub fn ewram_mut(&mut self) -> &mut [u8] {
+        self.bus.ewram_mut()
+    }
+
+    pub fn iwram(&self) -> &[u8] {
+        self.bus.iwram()
+    }
+
+    pub fn iwram_mut(&mut self) -> &mut [u8] {
+        self.bus.iwram_mut()
+    }
+
+    pub fn pram(&self) -> &[u8] {
+        self.bus.pram()
+    }
+
+    pub fn pram_mut(&mut self) -> &mut [u8] {
+        self.bus.pram_mut()
+    }
+
+    pub fn vram(&self) -> &[u8] {
+        self.bus.vram()
+    }
+
+    pub fn vram_mut(&mut self) -> &mut [u8] {
+        self.bus.vram_mut()
+    }
+
+    pub fn oam(&self) -> &[u8] {
+        self.bus.oam()
+    }
+
+    pub fn oam_mut(&mut self) -> &mut [u8] {
+        self.bus.oam_mut()
+    }
+
     pub fn take_audio_samples_i16(&mut self) -> Vec<i16> {
         self.bus.take_audio_samples()
     }

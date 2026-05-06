@@ -12,7 +12,7 @@ use emulator_gba::{
 };
 
 use super::common::{
-    fixed_audio_spec, load_state_slot, save_state_slot, write_file, write_optional_file,
+    fixed_audio_spec, load_state_slot, save_state_slot, write_byte, write_file, write_optional_file,
 };
 use crate::paths::rom_stem;
 use crate::system::{
@@ -94,28 +94,75 @@ impl GameBoyAdapter {
     }
 
     pub fn memory_regions(&self) -> Vec<MemoryRegion> {
-        self.emulator
-            .backup_data()
-            .map(|ram| {
-                vec![MemoryRegion {
-                    id: "cart_ram",
-                    label: "Cartridge RAM",
-                    len: ram.len(),
-                    writable: false,
-                }]
-            })
-            .unwrap_or_default()
+        let mut regions = vec![
+            MemoryRegion {
+                id: "wram",
+                label: "Work RAM",
+                len: gameboy_work_ram_len(self.system),
+                writable: true,
+            },
+            MemoryRegion {
+                id: "vram",
+                label: "Video RAM",
+                len: gameboy_video_ram_len(self.system),
+                writable: true,
+            },
+            MemoryRegion {
+                id: "oam",
+                label: "Object Attribute Memory",
+                len: self.emulator.oam().len(),
+                writable: true,
+            },
+            MemoryRegion {
+                id: "hram",
+                label: "High RAM",
+                len: self.emulator.high_ram().len(),
+                writable: true,
+            },
+        ];
+        if let Some(ram) = self.emulator.backup_data() {
+            regions.push(MemoryRegion {
+                id: "cart_ram",
+                label: "Cartridge RAM",
+                len: ram.len(),
+                writable: true,
+            });
+        }
+        regions
     }
 
     pub fn read_memory(&self, region_id: &str) -> Option<&[u8]> {
         match region_id {
+            "wram" => Some(&self.emulator.work_ram()[..gameboy_work_ram_len(self.system)]),
+            "vram" => Some(&self.emulator.video_ram()[..gameboy_video_ram_len(self.system)]),
+            "oam" => Some(self.emulator.oam()),
+            "hram" => Some(self.emulator.high_ram()),
             "cart_ram" => self.emulator.backup_data(),
             _ => None,
         }
     }
 
-    pub fn write_memory_byte(&mut self, _region_id: &str, _offset: usize, _value: u8) -> bool {
-        false
+    pub fn write_memory_byte(&mut self, region_id: &str, offset: usize, value: u8) -> bool {
+        match region_id {
+            "wram" => write_byte(
+                &mut self.emulator.work_ram_mut()[..gameboy_work_ram_len(self.system)],
+                offset,
+                value,
+            ),
+            "vram" => write_byte(
+                &mut self.emulator.video_ram_mut()[..gameboy_video_ram_len(self.system)],
+                offset,
+                value,
+            ),
+            "oam" => write_byte(self.emulator.oam_mut(), offset, value),
+            "hram" => write_byte(self.emulator.high_ram_mut(), offset, value),
+            "cart_ram" => self
+                .emulator
+                .backup_data_mut()
+                .map(|ram| write_byte(ram, offset, value))
+                .unwrap_or(false),
+            _ => false,
+        }
     }
 
     pub fn save_state_to_slot(&mut self, _slot: u8) -> Result<()> {
@@ -129,7 +176,7 @@ impl GameBoyAdapter {
     pub fn flush_persistent_save(&mut self) -> Result<()> {
         write_optional_file(
             &self.rom_path.with_extension("sav"),
-            self.emulator.backup_data().as_deref(),
+            self.emulator.backup_data(),
         )
     }
 }
@@ -208,15 +255,60 @@ impl GameBoyAdvanceAdapter {
     }
 
     pub fn memory_regions(&self) -> Vec<MemoryRegion> {
-        Vec::new()
+        vec![
+            MemoryRegion {
+                id: "ewram",
+                label: "External Work RAM",
+                len: self.emulator.ewram().len(),
+                writable: true,
+            },
+            MemoryRegion {
+                id: "iwram",
+                label: "Internal Work RAM",
+                len: self.emulator.iwram().len(),
+                writable: true,
+            },
+            MemoryRegion {
+                id: "pram",
+                label: "Palette RAM",
+                len: self.emulator.pram().len(),
+                writable: true,
+            },
+            MemoryRegion {
+                id: "vram",
+                label: "Video RAM",
+                len: self.emulator.vram().len(),
+                writable: true,
+            },
+            MemoryRegion {
+                id: "oam",
+                label: "Object Attribute Memory",
+                len: self.emulator.oam().len(),
+                writable: true,
+            },
+        ]
     }
 
-    pub fn read_memory(&self, _region_id: &str) -> Option<&[u8]> {
-        None
+    pub fn read_memory(&self, region_id: &str) -> Option<&[u8]> {
+        match region_id {
+            "ewram" => Some(self.emulator.ewram()),
+            "iwram" => Some(self.emulator.iwram()),
+            "pram" => Some(self.emulator.pram()),
+            "vram" => Some(self.emulator.vram()),
+            "oam" => Some(self.emulator.oam()),
+            _ => None,
+        }
     }
 
-    pub fn write_memory_byte(&mut self, _region_id: &str, _offset: usize, _value: u8) -> bool {
-        false
+    pub fn write_memory_byte(&mut self, region_id: &str, offset: usize, value: u8) -> bool {
+        match region_id {
+            "ewram" => write_byte(self.emulator.ewram_mut(), offset, value),
+            "iwram" => write_byte(self.emulator.iwram_mut(), offset, value),
+            "pram" => write_byte(self.emulator.pram_mut(), offset, value),
+            "vram" => write_byte(self.emulator.vram_mut(), offset, value),
+            "oam" => write_byte(self.emulator.oam_mut(), offset, value),
+            _ => false,
+        }
     }
 
     pub fn save_state_to_slot(&mut self, slot: u8) -> Result<()> {
@@ -298,6 +390,21 @@ fn gameboy_advance_button_mask(button: VirtualButton) -> Option<u16> {
         | VirtualButton::Mode => None,
     }
 }
+
+fn gameboy_work_ram_len(system: SystemKind) -> usize {
+    match system {
+        SystemKind::GameBoyColor => 32 * 1024,
+        _ => 8 * 1024,
+    }
+}
+
+fn gameboy_video_ram_len(system: SystemKind) -> usize {
+    match system {
+        SystemKind::GameBoyColor => 16 * 1024,
+        _ => 8 * 1024,
+    }
+}
+
 fn load_gameboy_backup(emulator: &mut GbEmulator, rom_path: &Path) {
     let save_path = rom_path.with_extension("sav");
     if let Ok(bytes) = std::fs::read(save_path) {
@@ -327,5 +434,48 @@ fn load_gameboy_advance_bios(emulator: &mut GbaEmulator) {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gameboy_adapter_exposes_writable_memory_regions() {
+        let mut adapter = GameBoyAdapter {
+            emulator: GbEmulator::new(GbModel::Dmg),
+            rom_path: PathBuf::from("dummy.gb"),
+            title: "dummy".to_string(),
+            system: SystemKind::GameBoy,
+            pressed_mask: 0,
+            audio_sample_rate_hz: 44_100,
+        };
+
+        assert!(adapter
+            .memory_regions()
+            .iter()
+            .any(|region| region.id == "wram"));
+        assert!(adapter.write_memory_byte("wram", 0x12, 0x34));
+        assert_eq!(adapter.read_memory("wram").unwrap()[0x12], 0x34);
+    }
+
+    #[test]
+    fn gba_adapter_exposes_writable_work_ram_regions() {
+        let mut adapter = GameBoyAdvanceAdapter {
+            emulator: GbaEmulator::new(),
+            frame_buffer: GbaFrameBuffer::new(),
+            rom_path: PathBuf::from("dummy.gba"),
+            title: "dummy".to_string(),
+            pressed_mask: 0,
+            audio_sample_rate_hz: 44_100,
+        };
+
+        assert!(adapter
+            .memory_regions()
+            .iter()
+            .any(|region| region.id == "ewram"));
+        assert!(adapter.write_memory_byte("iwram", 0x20, 0x56));
+        assert_eq!(adapter.read_memory("iwram").unwrap()[0x20], 0x56);
     }
 }

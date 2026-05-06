@@ -13,13 +13,13 @@ use crate::system::{
 };
 
 pub enum CoreInstance {
-    Nes(NesAdapter),
+    Nes(Box<NesAdapter>),
     Snes(Box<SnesAdapter>),
-    Sg1000(Sg1000Adapter),
-    MasterSystem(MasterSystemAdapter),
-    MegaDrive(MegaDriveAdapter),
+    Sg1000(Box<Sg1000Adapter>),
+    MasterSystem(Box<MasterSystemAdapter>),
+    MegaDrive(Box<MegaDriveAdapter>),
     Pce(Box<PceAdapter>),
-    GameBoy(GameBoyAdapter),
+    GameBoy(Box<GameBoyAdapter>),
     GameBoyAdvance(Box<GameBoyAdvanceAdapter>),
 }
 
@@ -39,18 +39,23 @@ impl CoreInstance {
         };
 
         match system {
-            SystemKind::Nes => NesAdapter::load(path).map(Self::Nes),
+            SystemKind::Nes => NesAdapter::load(path).map(Box::new).map(Self::Nes),
             SystemKind::Snes => SnesAdapter::load_with_audio(path, audio_enabled)
                 .map(|adapter| Self::Snes(Box::new(adapter))),
-            SystemKind::Sg1000 => Sg1000Adapter::load(path).map(Self::Sg1000),
-            SystemKind::MasterSystem => MasterSystemAdapter::load(path).map(Self::MasterSystem),
-            SystemKind::MegaDrive => MegaDriveAdapter::load(path).map(Self::MegaDrive),
+            SystemKind::Sg1000 => Sg1000Adapter::load(path).map(Box::new).map(Self::Sg1000),
+            SystemKind::MasterSystem => MasterSystemAdapter::load(path)
+                .map(Box::new)
+                .map(Self::MasterSystem),
+            SystemKind::MegaDrive => MegaDriveAdapter::load(path)
+                .map(Box::new)
+                .map(Self::MegaDrive),
             SystemKind::Pce => PceAdapter::load(path).map(|adapter| Self::Pce(Box::new(adapter))),
-            SystemKind::GameBoy => {
-                GameBoyAdapter::load(path, GbModel::Dmg, SystemKind::GameBoy).map(Self::GameBoy)
-            }
+            SystemKind::GameBoy => GameBoyAdapter::load(path, GbModel::Dmg, SystemKind::GameBoy)
+                .map(Box::new)
+                .map(Self::GameBoy),
             SystemKind::GameBoyColor => {
                 GameBoyAdapter::load(path, GbModel::Cgb, SystemKind::GameBoyColor)
+                    .map(Box::new)
                     .map(Self::GameBoy)
             }
             SystemKind::GameBoyAdvance => GameBoyAdvanceAdapter::load(path)

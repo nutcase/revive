@@ -1,4 +1,4 @@
-use revive_core::CoreInstance;
+use revive_core::{CoreInstance, SystemKind};
 use sdl2::keyboard::{Keycode, Mod, Scancode};
 
 use crate::hud::HudToast;
@@ -13,6 +13,12 @@ pub(crate) fn handle_state_key(
     let Some((slot, save)) = state_key_binding(key, scancode, keymod) else {
         return false;
     };
+    if !core.system().supports_save_state() {
+        let system = core.system().label();
+        eprintln!("save states are not available for {system}");
+        hud_toast.show(format!("{system} states unavailable"));
+        return true;
+    }
     if save {
         match core.save_state_to_slot(slot) {
             Ok(()) => {
@@ -93,11 +99,19 @@ fn state_save_modifier(keymod: Mod) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn state_key_help() -> &'static str {
-    "Cmd+1..9 load, Cmd+Shift+1..9 save"
+pub(crate) fn state_key_help(system: SystemKind) -> &'static str {
+    if system.supports_save_state() {
+        "Cmd+1..9 load, Cmd+Shift+1..9 save"
+    } else {
+        "not available for this system"
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn state_key_help() -> &'static str {
-    "Ctrl+1..9 load, Ctrl+Shift+1..9 save"
+pub(crate) fn state_key_help(system: SystemKind) -> &'static str {
+    if system.supports_save_state() {
+        "Ctrl+1..9 load, Ctrl+Shift+1..9 save"
+    } else {
+        "not available for this system"
+    }
 }

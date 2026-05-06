@@ -181,6 +181,10 @@ impl SystemKind {
         self.info().state_extension
     }
 
+    pub fn supports_save_state(self) -> bool {
+        !self.state_extension().is_empty()
+    }
+
     pub fn frame_rate_hz(self) -> f64 {
         self.info().frame_rate_hz
     }

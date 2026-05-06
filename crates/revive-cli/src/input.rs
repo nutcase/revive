@@ -60,251 +60,221 @@ pub(crate) fn release_keyboard_input(core: &mut CoreInstance) {
 }
 
 pub(crate) fn keycode_button(system: SystemKind, key: Keycode) -> Option<VirtualButton> {
-    match system {
-        SystemKind::Nes => nes_keycode_button(key),
-        SystemKind::Snes => snes_keycode_button(key),
-        SystemKind::Sg1000 => sg1000_keycode_button(key),
-        SystemKind::MasterSystem => mastersystem_keycode_button(key),
-        SystemKind::MegaDrive => megadrive_keycode_button(key),
-        SystemKind::Pce => pce_keycode_button(key),
-        SystemKind::GameBoy | SystemKind::GameBoyColor => gameboy_keycode_button(key),
-        SystemKind::GameBoyAdvance => gameboy_advance_keycode_button(key),
-    }
-}
-
-fn nes_keycode_button(key: Keycode) -> Option<VirtualButton> {
-    match key {
-        Keycode::Up => Some(VirtualButton::Up),
-        Keycode::Down => Some(VirtualButton::Down),
-        Keycode::Left => Some(VirtualButton::Left),
-        Keycode::Right => Some(VirtualButton::Right),
-        Keycode::Z | Keycode::J => Some(VirtualButton::A),
-        Keycode::X | Keycode::K => Some(VirtualButton::B),
-        Keycode::Return | Keycode::Space => Some(VirtualButton::Start),
-        Keycode::Backspace | Keycode::RShift | Keycode::LShift => Some(VirtualButton::Select),
-        _ => None,
-    }
-}
-
-fn snes_keycode_button(key: Keycode) -> Option<VirtualButton> {
-    match key {
-        Keycode::Up => Some(VirtualButton::Up),
-        Keycode::Down => Some(VirtualButton::Down),
-        Keycode::Left => Some(VirtualButton::Left),
-        Keycode::Right => Some(VirtualButton::Right),
-        Keycode::D => Some(VirtualButton::A),
-        Keycode::S => Some(VirtualButton::B),
-        Keycode::W => Some(VirtualButton::X),
-        Keycode::A => Some(VirtualButton::Y),
-        Keycode::E => Some(VirtualButton::L),
-        Keycode::Q => Some(VirtualButton::R),
-        Keycode::Return | Keycode::Space => Some(VirtualButton::Start),
-        Keycode::Backspace | Keycode::RShift | Keycode::LShift => Some(VirtualButton::Select),
-        _ => None,
-    }
-}
-
-fn megadrive_keycode_button(key: Keycode) -> Option<VirtualButton> {
-    match key {
-        Keycode::Up => Some(VirtualButton::Up),
-        Keycode::Down => Some(VirtualButton::Down),
-        Keycode::Left => Some(VirtualButton::Left),
-        Keycode::Right => Some(VirtualButton::Right),
-        Keycode::A => Some(VirtualButton::A),
-        Keycode::Z => Some(VirtualButton::B),
-        Keycode::X => Some(VirtualButton::C),
-        Keycode::S => Some(VirtualButton::X),
-        Keycode::D => Some(VirtualButton::Y),
-        Keycode::F => Some(VirtualButton::Z),
-        Keycode::Q => Some(VirtualButton::Mode),
-        Keycode::Return | Keycode::Space => Some(VirtualButton::Start),
-        _ => None,
-    }
-}
-
-fn sg1000_keycode_button(key: Keycode) -> Option<VirtualButton> {
-    match key {
-        Keycode::Up => Some(VirtualButton::Up),
-        Keycode::Down => Some(VirtualButton::Down),
-        Keycode::Left => Some(VirtualButton::Left),
-        Keycode::Right => Some(VirtualButton::Right),
-        Keycode::Z | Keycode::J => Some(VirtualButton::A),
-        Keycode::X | Keycode::K => Some(VirtualButton::B),
-        _ => None,
-    }
-}
-
-fn mastersystem_keycode_button(key: Keycode) -> Option<VirtualButton> {
-    sg1000_keycode_button(key)
-}
-
-fn pce_keycode_button(key: Keycode) -> Option<VirtualButton> {
-    match key {
-        Keycode::Up => Some(VirtualButton::Up),
-        Keycode::Down => Some(VirtualButton::Down),
-        Keycode::Left => Some(VirtualButton::Left),
-        Keycode::Right => Some(VirtualButton::Right),
-        Keycode::Z | Keycode::J => Some(VirtualButton::A),
-        Keycode::X | Keycode::K => Some(VirtualButton::B),
-        Keycode::Return | Keycode::Space => Some(VirtualButton::Start),
-        Keycode::Backspace | Keycode::RShift | Keycode::LShift => Some(VirtualButton::Select),
-        _ => None,
-    }
-}
-
-fn gameboy_keycode_button(key: Keycode) -> Option<VirtualButton> {
-    match key {
-        Keycode::Up => Some(VirtualButton::Up),
-        Keycode::Down => Some(VirtualButton::Down),
-        Keycode::Left => Some(VirtualButton::Left),
-        Keycode::Right => Some(VirtualButton::Right),
-        Keycode::X | Keycode::J => Some(VirtualButton::A),
-        Keycode::Z | Keycode::K => Some(VirtualButton::B),
-        Keycode::Return | Keycode::Space => Some(VirtualButton::Start),
-        Keycode::Backspace | Keycode::RShift | Keycode::LShift => Some(VirtualButton::Select),
-        _ => None,
-    }
-}
-
-fn gameboy_advance_keycode_button(key: Keycode) -> Option<VirtualButton> {
-    match key {
-        Keycode::A => Some(VirtualButton::L),
-        Keycode::S => Some(VirtualButton::R),
-        _ => gameboy_keycode_button(key),
-    }
+    bindings_for_system(system)
+        .iter()
+        .find(|binding| binding.keycodes.contains(&key))
+        .map(|binding| binding.button)
 }
 
 fn button_pressed(system: SystemKind, keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
-    match system {
-        SystemKind::Nes => nes_button_pressed(keyboard, button),
-        SystemKind::Snes => snes_button_pressed(keyboard, button),
-        SystemKind::Sg1000 => sg1000_button_pressed(keyboard, button),
-        SystemKind::MasterSystem => mastersystem_button_pressed(keyboard, button),
-        SystemKind::MegaDrive => megadrive_button_pressed(keyboard, button),
-        SystemKind::Pce => pce_button_pressed(keyboard, button),
-        SystemKind::GameBoy | SystemKind::GameBoyColor => gameboy_button_pressed(keyboard, button),
-        SystemKind::GameBoyAdvance => gameboy_advance_button_pressed(keyboard, button),
-    }
-}
-
-fn nes_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
-    match button {
-        VirtualButton::Up => scancode_down(keyboard, &[Scancode::Up]),
-        VirtualButton::Down => scancode_down(keyboard, &[Scancode::Down]),
-        VirtualButton::Left => scancode_down(keyboard, &[Scancode::Left]),
-        VirtualButton::Right => scancode_down(keyboard, &[Scancode::Right]),
-        VirtualButton::A => scancode_down(keyboard, &[Scancode::Z, Scancode::J]),
-        VirtualButton::B => scancode_down(keyboard, &[Scancode::X, Scancode::K]),
-        VirtualButton::Start => scancode_down(keyboard, &[Scancode::Return, Scancode::Space]),
-        VirtualButton::Select => scancode_down(
-            keyboard,
-            &[Scancode::Backspace, Scancode::LShift, Scancode::RShift],
-        ),
-        _ => false,
-    }
-}
-
-fn snes_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
-    match button {
-        VirtualButton::Up => scancode_down(keyboard, &[Scancode::Up]),
-        VirtualButton::Down => scancode_down(keyboard, &[Scancode::Down]),
-        VirtualButton::Left => scancode_down(keyboard, &[Scancode::Left]),
-        VirtualButton::Right => scancode_down(keyboard, &[Scancode::Right]),
-        VirtualButton::A => scancode_down(keyboard, &[Scancode::D]),
-        VirtualButton::B => scancode_down(keyboard, &[Scancode::S]),
-        VirtualButton::X => scancode_down(keyboard, &[Scancode::W]),
-        VirtualButton::Y => scancode_down(keyboard, &[Scancode::A]),
-        VirtualButton::L => scancode_down(keyboard, &[Scancode::E]),
-        VirtualButton::R => scancode_down(keyboard, &[Scancode::Q]),
-        VirtualButton::Start => scancode_down(keyboard, &[Scancode::Return, Scancode::Space]),
-        VirtualButton::Select => scancode_down(
-            keyboard,
-            &[Scancode::Backspace, Scancode::LShift, Scancode::RShift],
-        ),
-        _ => false,
-    }
-}
-
-fn megadrive_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
-    match button {
-        VirtualButton::Up => scancode_down(keyboard, &[Scancode::Up]),
-        VirtualButton::Down => scancode_down(keyboard, &[Scancode::Down]),
-        VirtualButton::Left => scancode_down(keyboard, &[Scancode::Left]),
-        VirtualButton::Right => scancode_down(keyboard, &[Scancode::Right]),
-        VirtualButton::A => scancode_down(keyboard, &[Scancode::A]),
-        VirtualButton::B => scancode_down(keyboard, &[Scancode::Z]),
-        VirtualButton::C => scancode_down(keyboard, &[Scancode::X]),
-        VirtualButton::X => scancode_down(keyboard, &[Scancode::S]),
-        VirtualButton::Y => scancode_down(keyboard, &[Scancode::D]),
-        VirtualButton::Z => scancode_down(keyboard, &[Scancode::F]),
-        VirtualButton::Mode => scancode_down(keyboard, &[Scancode::Q]),
-        VirtualButton::Start => scancode_down(keyboard, &[Scancode::Return, Scancode::Space]),
-        _ => false,
-    }
-}
-
-fn sg1000_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
-    match button {
-        VirtualButton::Up => scancode_down(keyboard, &[Scancode::Up]),
-        VirtualButton::Down => scancode_down(keyboard, &[Scancode::Down]),
-        VirtualButton::Left => scancode_down(keyboard, &[Scancode::Left]),
-        VirtualButton::Right => scancode_down(keyboard, &[Scancode::Right]),
-        VirtualButton::A => scancode_down(keyboard, &[Scancode::Z, Scancode::J]),
-        VirtualButton::B => scancode_down(keyboard, &[Scancode::X, Scancode::K]),
-        _ => false,
-    }
-}
-
-fn mastersystem_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
-    sg1000_button_pressed(keyboard, button)
-}
-
-fn pce_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
-    match button {
-        VirtualButton::Up => scancode_down(keyboard, &[Scancode::Up]),
-        VirtualButton::Down => scancode_down(keyboard, &[Scancode::Down]),
-        VirtualButton::Left => scancode_down(keyboard, &[Scancode::Left]),
-        VirtualButton::Right => scancode_down(keyboard, &[Scancode::Right]),
-        VirtualButton::A => scancode_down(keyboard, &[Scancode::Z, Scancode::J]),
-        VirtualButton::B => scancode_down(keyboard, &[Scancode::X, Scancode::K]),
-        VirtualButton::Start => scancode_down(keyboard, &[Scancode::Return, Scancode::Space]),
-        VirtualButton::Select => scancode_down(
-            keyboard,
-            &[Scancode::Backspace, Scancode::LShift, Scancode::RShift],
-        ),
-        _ => false,
-    }
-}
-
-fn gameboy_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
-    match button {
-        VirtualButton::Up => scancode_down(keyboard, &[Scancode::Up]),
-        VirtualButton::Down => scancode_down(keyboard, &[Scancode::Down]),
-        VirtualButton::Left => scancode_down(keyboard, &[Scancode::Left]),
-        VirtualButton::Right => scancode_down(keyboard, &[Scancode::Right]),
-        VirtualButton::A => scancode_down(keyboard, &[Scancode::X, Scancode::J]),
-        VirtualButton::B => scancode_down(keyboard, &[Scancode::Z, Scancode::K]),
-        VirtualButton::Start => scancode_down(keyboard, &[Scancode::Return, Scancode::Space]),
-        VirtualButton::Select => scancode_down(
-            keyboard,
-            &[Scancode::Backspace, Scancode::LShift, Scancode::RShift],
-        ),
-        _ => false,
-    }
-}
-
-fn gameboy_advance_button_pressed(keyboard: &KeyboardState<'_>, button: VirtualButton) -> bool {
-    match button {
-        VirtualButton::L => scancode_down(keyboard, &[Scancode::A]),
-        VirtualButton::R => scancode_down(keyboard, &[Scancode::S]),
-        _ => gameboy_button_pressed(keyboard, button),
-    }
-}
-
-fn scancode_down(keyboard: &KeyboardState<'_>, scancodes: &[Scancode]) -> bool {
-    scancodes
+    bindings_for_system(system)
         .iter()
-        .any(|scancode| keyboard.is_scancode_pressed(*scancode))
+        .find(|binding| binding.button == button)
+        .is_some_and(|binding| {
+            binding
+                .scancodes
+                .iter()
+                .any(|scancode| keyboard.is_scancode_pressed(*scancode))
+        })
+}
+
+struct ButtonBinding {
+    button: VirtualButton,
+    keycodes: &'static [Keycode],
+    scancodes: &'static [Scancode],
+}
+
+fn bindings_for_system(system: SystemKind) -> &'static [ButtonBinding] {
+    match system {
+        SystemKind::Nes => &NES_BINDINGS,
+        SystemKind::Snes => &SNES_BINDINGS,
+        SystemKind::Sg1000 | SystemKind::MasterSystem => &SEGA_8_BIT_BINDINGS,
+        SystemKind::MegaDrive => &MEGA_DRIVE_BINDINGS,
+        SystemKind::Pce => &PCE_BINDINGS,
+        SystemKind::GameBoy | SystemKind::GameBoyColor => &GAME_BOY_BINDINGS,
+        SystemKind::GameBoyAdvance => &GAME_BOY_ADVANCE_BINDINGS,
+    }
+}
+
+static NES_BINDINGS: [ButtonBinding; 8] = [
+    binding(VirtualButton::Up, &[Keycode::Up], &[Scancode::Up]),
+    binding(VirtualButton::Down, &[Keycode::Down], &[Scancode::Down]),
+    binding(VirtualButton::Left, &[Keycode::Left], &[Scancode::Left]),
+    binding(VirtualButton::Right, &[Keycode::Right], &[Scancode::Right]),
+    binding(
+        VirtualButton::A,
+        &[Keycode::Z, Keycode::J],
+        &[Scancode::Z, Scancode::J],
+    ),
+    binding(
+        VirtualButton::B,
+        &[Keycode::X, Keycode::K],
+        &[Scancode::X, Scancode::K],
+    ),
+    binding(
+        VirtualButton::Start,
+        &[Keycode::Return, Keycode::Space],
+        &[Scancode::Return, Scancode::Space],
+    ),
+    binding(
+        VirtualButton::Select,
+        &[Keycode::Backspace, Keycode::RShift, Keycode::LShift],
+        &[Scancode::Backspace, Scancode::RShift, Scancode::LShift],
+    ),
+];
+
+static SNES_BINDINGS: [ButtonBinding; 12] = [
+    binding(VirtualButton::Up, &[Keycode::Up], &[Scancode::Up]),
+    binding(VirtualButton::Down, &[Keycode::Down], &[Scancode::Down]),
+    binding(VirtualButton::Left, &[Keycode::Left], &[Scancode::Left]),
+    binding(VirtualButton::Right, &[Keycode::Right], &[Scancode::Right]),
+    binding(VirtualButton::A, &[Keycode::D], &[Scancode::D]),
+    binding(VirtualButton::B, &[Keycode::S], &[Scancode::S]),
+    binding(VirtualButton::X, &[Keycode::W], &[Scancode::W]),
+    binding(VirtualButton::Y, &[Keycode::A], &[Scancode::A]),
+    binding(VirtualButton::L, &[Keycode::E], &[Scancode::E]),
+    binding(VirtualButton::R, &[Keycode::Q], &[Scancode::Q]),
+    binding(
+        VirtualButton::Start,
+        &[Keycode::Return, Keycode::Space],
+        &[Scancode::Return, Scancode::Space],
+    ),
+    binding(
+        VirtualButton::Select,
+        &[Keycode::Backspace, Keycode::RShift, Keycode::LShift],
+        &[Scancode::Backspace, Scancode::RShift, Scancode::LShift],
+    ),
+];
+
+static SEGA_8_BIT_BINDINGS: [ButtonBinding; 6] = [
+    binding(VirtualButton::Up, &[Keycode::Up], &[Scancode::Up]),
+    binding(VirtualButton::Down, &[Keycode::Down], &[Scancode::Down]),
+    binding(VirtualButton::Left, &[Keycode::Left], &[Scancode::Left]),
+    binding(VirtualButton::Right, &[Keycode::Right], &[Scancode::Right]),
+    binding(
+        VirtualButton::A,
+        &[Keycode::Z, Keycode::J],
+        &[Scancode::Z, Scancode::J],
+    ),
+    binding(
+        VirtualButton::B,
+        &[Keycode::X, Keycode::K],
+        &[Scancode::X, Scancode::K],
+    ),
+];
+
+static MEGA_DRIVE_BINDINGS: [ButtonBinding; 12] = [
+    binding(VirtualButton::Up, &[Keycode::Up], &[Scancode::Up]),
+    binding(VirtualButton::Down, &[Keycode::Down], &[Scancode::Down]),
+    binding(VirtualButton::Left, &[Keycode::Left], &[Scancode::Left]),
+    binding(VirtualButton::Right, &[Keycode::Right], &[Scancode::Right]),
+    binding(VirtualButton::A, &[Keycode::A], &[Scancode::A]),
+    binding(VirtualButton::B, &[Keycode::Z], &[Scancode::Z]),
+    binding(VirtualButton::C, &[Keycode::X], &[Scancode::X]),
+    binding(VirtualButton::X, &[Keycode::S], &[Scancode::S]),
+    binding(VirtualButton::Y, &[Keycode::D], &[Scancode::D]),
+    binding(VirtualButton::Z, &[Keycode::F], &[Scancode::F]),
+    binding(VirtualButton::Mode, &[Keycode::Q], &[Scancode::Q]),
+    binding(
+        VirtualButton::Start,
+        &[Keycode::Return, Keycode::Space],
+        &[Scancode::Return, Scancode::Space],
+    ),
+];
+
+static PCE_BINDINGS: [ButtonBinding; 8] = [
+    binding(VirtualButton::Up, &[Keycode::Up], &[Scancode::Up]),
+    binding(VirtualButton::Down, &[Keycode::Down], &[Scancode::Down]),
+    binding(VirtualButton::Left, &[Keycode::Left], &[Scancode::Left]),
+    binding(VirtualButton::Right, &[Keycode::Right], &[Scancode::Right]),
+    binding(
+        VirtualButton::A,
+        &[Keycode::Z, Keycode::J],
+        &[Scancode::Z, Scancode::J],
+    ),
+    binding(
+        VirtualButton::B,
+        &[Keycode::X, Keycode::K],
+        &[Scancode::X, Scancode::K],
+    ),
+    binding(
+        VirtualButton::Start,
+        &[Keycode::Return, Keycode::Space],
+        &[Scancode::Return, Scancode::Space],
+    ),
+    binding(
+        VirtualButton::Select,
+        &[Keycode::Backspace, Keycode::RShift, Keycode::LShift],
+        &[Scancode::Backspace, Scancode::RShift, Scancode::LShift],
+    ),
+];
+
+static GAME_BOY_BINDINGS: [ButtonBinding; 8] = [
+    binding(VirtualButton::Up, &[Keycode::Up], &[Scancode::Up]),
+    binding(VirtualButton::Down, &[Keycode::Down], &[Scancode::Down]),
+    binding(VirtualButton::Left, &[Keycode::Left], &[Scancode::Left]),
+    binding(VirtualButton::Right, &[Keycode::Right], &[Scancode::Right]),
+    binding(
+        VirtualButton::A,
+        &[Keycode::X, Keycode::J],
+        &[Scancode::X, Scancode::J],
+    ),
+    binding(
+        VirtualButton::B,
+        &[Keycode::Z, Keycode::K],
+        &[Scancode::Z, Scancode::K],
+    ),
+    binding(
+        VirtualButton::Start,
+        &[Keycode::Return, Keycode::Space],
+        &[Scancode::Return, Scancode::Space],
+    ),
+    binding(
+        VirtualButton::Select,
+        &[Keycode::Backspace, Keycode::RShift, Keycode::LShift],
+        &[Scancode::Backspace, Scancode::RShift, Scancode::LShift],
+    ),
+];
+
+static GAME_BOY_ADVANCE_BINDINGS: [ButtonBinding; 10] = [
+    binding(VirtualButton::Up, &[Keycode::Up], &[Scancode::Up]),
+    binding(VirtualButton::Down, &[Keycode::Down], &[Scancode::Down]),
+    binding(VirtualButton::Left, &[Keycode::Left], &[Scancode::Left]),
+    binding(VirtualButton::Right, &[Keycode::Right], &[Scancode::Right]),
+    binding(
+        VirtualButton::A,
+        &[Keycode::X, Keycode::J],
+        &[Scancode::X, Scancode::J],
+    ),
+    binding(
+        VirtualButton::B,
+        &[Keycode::Z, Keycode::K],
+        &[Scancode::Z, Scancode::K],
+    ),
+    binding(VirtualButton::L, &[Keycode::A], &[Scancode::A]),
+    binding(VirtualButton::R, &[Keycode::S], &[Scancode::S]),
+    binding(
+        VirtualButton::Start,
+        &[Keycode::Return, Keycode::Space],
+        &[Scancode::Return, Scancode::Space],
+    ),
+    binding(
+        VirtualButton::Select,
+        &[Keycode::Backspace, Keycode::RShift, Keycode::LShift],
+        &[Scancode::Backspace, Scancode::RShift, Scancode::LShift],
+    ),
+];
+
+const fn binding(
+    button: VirtualButton,
+    keycodes: &'static [Keycode],
+    scancodes: &'static [Scancode],
+) -> ButtonBinding {
+    ButtonBinding {
+        button,
+        keycodes,
+        scancodes,
+    }
 }
 
 fn button_index(button: VirtualButton) -> usize {
@@ -344,5 +314,49 @@ pub(crate) fn button_label(button: VirtualButton) -> &'static str {
         VirtualButton::C => "C",
         VirtualButton::Z => "Z",
         VirtualButton::Mode => "Mode",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keycode_bindings_cover_shared_system_controls() {
+        assert_eq!(
+            keycode_button(SystemKind::MegaDrive, Keycode::Return),
+            Some(VirtualButton::Start)
+        );
+        assert_eq!(
+            keycode_button(SystemKind::MasterSystem, Keycode::Z),
+            Some(VirtualButton::A)
+        );
+        assert_eq!(
+            keycode_button(SystemKind::GameBoyAdvance, Keycode::A),
+            Some(VirtualButton::L)
+        );
+    }
+
+    #[test]
+    fn every_keycode_binding_has_scancode_coverage() {
+        for system in [
+            SystemKind::Nes,
+            SystemKind::Snes,
+            SystemKind::Sg1000,
+            SystemKind::MasterSystem,
+            SystemKind::MegaDrive,
+            SystemKind::Pce,
+            SystemKind::GameBoy,
+            SystemKind::GameBoyColor,
+            SystemKind::GameBoyAdvance,
+        ] {
+            for binding in bindings_for_system(system) {
+                assert!(
+                    !binding.keycodes.is_empty() && !binding.scancodes.is_empty(),
+                    "{system:?} {:?} should map both event and keyboard-state input",
+                    binding.button
+                );
+            }
+        }
     }
 }

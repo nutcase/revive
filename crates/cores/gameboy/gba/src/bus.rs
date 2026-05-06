@@ -1592,6 +1592,46 @@ impl GbaBus {
         )
     }
 
+    pub fn ewram(&self) -> &[u8] {
+        &self.ewram
+    }
+
+    pub fn ewram_mut(&mut self) -> &mut [u8] {
+        &mut self.ewram
+    }
+
+    pub fn iwram(&self) -> &[u8] {
+        &self.iwram
+    }
+
+    pub fn iwram_mut(&mut self) -> &mut [u8] {
+        &mut self.iwram
+    }
+
+    pub fn pram(&self) -> &[u8] {
+        &self.pram
+    }
+
+    pub fn pram_mut(&mut self) -> &mut [u8] {
+        &mut self.pram
+    }
+
+    pub fn vram(&self) -> &[u8] {
+        &self.vram
+    }
+
+    pub fn vram_mut(&mut self) -> &mut [u8] {
+        &mut self.vram
+    }
+
+    pub fn oam(&self) -> &[u8] {
+        &self.oam
+    }
+
+    pub fn oam_mut(&mut self) -> &mut [u8] {
+        &mut self.oam
+    }
+
     pub fn backup_data(&self) -> Option<Vec<u8>> {
         match self.save_type {
             SaveType::Eeprom => Some(self.eeprom.borrow().storage_bytes()),
