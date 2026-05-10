@@ -165,12 +165,36 @@ impl GameBoyAdapter {
         }
     }
 
-    pub fn save_state_to_slot(&mut self, _slot: u8) -> Result<()> {
-        Err("Game Boy save states are not exposed by ../gameboy yet".to_string())
+    pub fn save_state_to_slot(&mut self, slot: u8) -> Result<()> {
+        save_state_slot(
+            self.system,
+            &self.rom_path,
+            slot,
+            self.system.state_extension(),
+            |path| {
+                let state_data = self.emulator.save_state();
+                write_file(path, &state_data)
+            },
+        )
     }
 
-    pub fn load_state_from_slot(&mut self, _slot: u8) -> Result<()> {
-        Err("Game Boy save states are not exposed by ../gameboy yet".to_string())
+    pub fn load_state_from_slot(&mut self, slot: u8) -> Result<()> {
+        let mut state_data = Vec::new();
+        load_state_slot(
+            self.system,
+            &self.rom_path,
+            slot,
+            self.system.state_extension(),
+            |path| {
+                state_data = std::fs::read(path).map_err(|err| err.to_string())?;
+                Ok(())
+            },
+        )?;
+        self.emulator
+            .load_state(&state_data)
+            .map_err(|err| err.to_string())?;
+        self.emulator.set_keyinput_pressed_mask(self.pressed_mask);
+        Ok(())
     }
 
     pub fn flush_persistent_save(&mut self) -> Result<()> {

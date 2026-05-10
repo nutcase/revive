@@ -20,6 +20,24 @@ impl Default for Mbc5State {
 }
 
 impl Mbc5State {
+    pub(crate) fn serialize_state(&self, w: &mut crate::state::StateWriter) {
+        w.write_u8(self.rom_bank_low8);
+        w.write_u8(self.rom_bank_high1);
+        w.write_u8(self.ram_bank);
+        w.write_bool(self.ram_enabled);
+    }
+
+    pub(crate) fn deserialize_state(
+        &mut self,
+        r: &mut crate::state::StateReader<'_>,
+    ) -> Result<(), &'static str> {
+        self.rom_bank_low8 = r.read_u8()?;
+        self.rom_bank_high1 = r.read_u8()? & 0x01;
+        self.ram_bank = r.read_u8()? & 0x0F;
+        self.ram_enabled = r.read_bool()?;
+        Ok(())
+    }
+
     pub fn write_rom_control(&mut self, addr: u16, value: u8) {
         match addr {
             0x0000..=0x1FFF => {

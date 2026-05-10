@@ -90,7 +90,7 @@ const GAME_BOY_INFO: SystemInfo = SystemInfo {
     kind: SystemKind::GameBoy,
     label: "Game Boy",
     storage_dir: "gb",
-    state_extension: "",
+    state_extension: "gbst",
     rom_extensions: &["gb"],
     dialog_extensions: &["gb"],
     frame_rate_hz: 59.7275,
@@ -100,7 +100,7 @@ const GAME_BOY_COLOR_INFO: SystemInfo = SystemInfo {
     kind: SystemKind::GameBoyColor,
     label: "Game Boy Color",
     storage_dir: "gbc",
-    state_extension: "",
+    state_extension: "gbcst",
     rom_extensions: &["gbc"],
     dialog_extensions: &["gbc"],
     frame_rate_hz: 59.7275,
@@ -351,5 +351,13 @@ mod tests {
         let _ = std::fs::remove_file(path);
 
         assert_eq!(detected, SystemKind::MegaDrive);
+    }
+
+    #[test]
+    fn gameboy_systems_support_save_state_slots() {
+        assert!(SystemKind::GameBoy.supports_save_state());
+        assert_eq!(SystemKind::GameBoy.state_extension(), "gbst");
+        assert!(SystemKind::GameBoyColor.supports_save_state());
+        assert_eq!(SystemKind::GameBoyColor.state_extension(), "gbcst");
     }
 }

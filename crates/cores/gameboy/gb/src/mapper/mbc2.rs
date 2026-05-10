@@ -16,22 +16,35 @@ impl Default for Mbc2State {
 }
 
 impl Mbc2State {
+    pub(crate) fn serialize_state(&self, w: &mut crate::state::StateWriter) {
+        w.write_u8(self.rom_bank);
+        w.write_bool(self.ram_enabled);
+    }
+
+    pub(crate) fn deserialize_state(
+        &mut self,
+        r: &mut crate::state::StateReader<'_>,
+    ) -> Result<(), &'static str> {
+        self.rom_bank = r.read_u8()? & 0x0F;
+        if self.rom_bank == 0 {
+            self.rom_bank = 1;
+        }
+        self.ram_enabled = r.read_bool()?;
+        Ok(())
+    }
+
     pub fn write_rom_control(&mut self, addr: u16, value: u8) {
         match addr {
-            0x0000..=0x1FFF => {
-                // MBC2 uses A8 to distinguish RAM enable from ROM-bank writes.
-                if (addr & 0x0100) == 0 {
-                    self.ram_enabled = (value & 0x0F) == 0x0A;
-                }
+            // MBC2 uses A8 to distinguish RAM enable from ROM-bank writes.
+            0x0000..=0x1FFF if (addr & 0x0100) == 0 => {
+                self.ram_enabled = (value & 0x0F) == 0x0A;
             }
-            0x2000..=0x3FFF => {
-                if (addr & 0x0100) != 0 {
-                    let mut bank = value & 0x0F;
-                    if bank == 0 {
-                        bank = 1;
-                    }
-                    self.rom_bank = bank;
+            0x2000..=0x3FFF if (addr & 0x0100) != 0 => {
+                let mut bank = value & 0x0F;
+                if bank == 0 {
+                    bank = 1;
                 }
+                self.rom_bank = bank;
             }
             _ => {}
         }

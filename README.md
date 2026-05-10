@@ -145,9 +145,6 @@ Common controls:
 - Windows/Linux: `Ctrl + 1..9` loads state slots 1..9
 - Windows/Linux: `Ctrl + Shift + 1..9` saves state slots 1..9
 
-State slots are unavailable for Game Boy / Game Boy Color until that core
-exposes save-state serialization.
-
 NES:
 
 - Arrow keys: D-pad
@@ -300,6 +297,8 @@ states/mastersystem/Alex Kidd in Miracle World/slot1.smsst
 states/megadrive/Sonic The Hedgehog/slot1.mdst
 states/nes/Super Mario Bros/slot1.sav
 states/pce/Adventure Island/slot1.pcst
+states/gb/Tetris/slot1.gbst
+states/gbc/Dragon Warrior Monsters/slot1.gbcst
 states/gba/Example/slot1.gbas
 ```
 
@@ -309,11 +308,6 @@ Legacy save-state files are used as load-only fallbacks.
 states/<system>/<rom>.slot<N>.<ext>
 states/<rom>.slot<N>.sav  # legacy NES format
 ```
-
-Limitations:
-
-- GB/GBC save states are not currently exposed by the Game Boy core API.
-- GBA save states are supported.
 
 ## Persistent Saves
 

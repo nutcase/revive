@@ -14,6 +14,22 @@ impl GbTimer {
         self.tima_reload_delay = 0;
     }
 
+    pub fn serialize_state(&self, w: &mut crate::state::StateWriter) {
+        w.write_u16(self.div_counter);
+        w.write_u8(self.last_tac);
+        w.write_u8(self.tima_reload_delay);
+    }
+
+    pub fn deserialize_state(
+        &mut self,
+        r: &mut crate::state::StateReader<'_>,
+    ) -> Result<(), &'static str> {
+        self.div_counter = r.read_u16()?;
+        self.last_tac = r.read_u8()?;
+        self.tima_reload_delay = r.read_u8()?;
+        Ok(())
+    }
+
     pub fn step(&mut self, cycles: u32, bus: &mut GbBus) {
         self.handle_tac_write_side_effect(bus);
         if bus.take_div_reset_request() {

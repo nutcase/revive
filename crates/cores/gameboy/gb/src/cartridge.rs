@@ -86,6 +86,45 @@ impl GbCartridge {
         };
     }
 
+    pub fn rom_bytes(&self) -> &[u8] {
+        &self.rom
+    }
+
+    pub(crate) fn serialize_state(&self, w: &mut crate::state::StateWriter) {
+        w.write_vec_u8(&self.ram);
+        w.write_u8(mapper_state_tag(&self.state));
+        match &self.state {
+            MapperState::RomOnly => {}
+            MapperState::Mbc2(state) => state.serialize_state(w),
+            MapperState::Mbc1(state) => state.serialize_state(w),
+            MapperState::Mbc3(state) => state.serialize_state(w),
+            MapperState::Mbc5(state) => state.serialize_state(w),
+        }
+    }
+
+    pub(crate) fn deserialize_state(
+        &mut self,
+        r: &mut crate::state::StateReader<'_>,
+    ) -> Result<(), &'static str> {
+        let ram = r.read_vec_u8()?;
+        if ram.len() != self.ram.len() {
+            return Err("cartridge RAM size mismatch");
+        }
+        self.ram.copy_from_slice(&ram);
+
+        let tag = r.read_u8()?;
+        if tag != mapper_state_tag(&self.state) {
+            return Err("cartridge mapper state mismatch");
+        }
+        match &mut self.state {
+            MapperState::RomOnly => Ok(()),
+            MapperState::Mbc2(state) => state.deserialize_state(r),
+            MapperState::Mbc1(state) => state.deserialize_state(r),
+            MapperState::Mbc3(state) => state.deserialize_state(r),
+            MapperState::Mbc5(state) => state.deserialize_state(r),
+        }
+    }
+
     pub fn read_rom(&self, addr: u16) -> u8 {
         let addr_usize = addr as usize;
         match addr {
@@ -201,6 +240,16 @@ impl GbCartridge {
 
         let normalized = index % self.ram.len();
         self.ram[normalized]
+    }
+}
+
+fn mapper_state_tag(state: &MapperState) -> u8 {
+    match state {
+        MapperState::RomOnly => 0,
+        MapperState::Mbc2(_) => 2,
+        MapperState::Mbc1(_) => 1,
+        MapperState::Mbc3(_) => 3,
+        MapperState::Mbc5(_) => 5,
     }
 }
 

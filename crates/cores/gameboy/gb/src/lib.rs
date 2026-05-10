@@ -5,6 +5,7 @@ mod cpu;
 mod mapper;
 mod ppu;
 mod serial;
+pub mod state;
 mod timer;
 
 use bus::GbBus;
@@ -170,8 +171,84 @@ impl GbEmulator {
         self.bus.audio_sample_rate_hz()
     }
 
+    fn serialize_state_payload(&self) -> Vec<u8> {
+        let mut w = state::StateWriter::new();
+        self.bus.serialize_state(&mut w);
+        self.cpu.serialize_state(&mut w);
+        self.ppu.serialize_state(&mut w);
+        self.timer.serialize_state(&mut w);
+        self.serial.serialize_state(&mut w);
+        w.write_u64(self.frame_number);
+        w.write_u32(self.cgb_ppu_cycle_carry);
+        w.write_bool(self.rom_loaded);
+        w.into_vec()
+    }
+
+    pub fn save_state(&self) -> Vec<u8> {
+        let payload = self.serialize_state_payload();
+        let payload_len = payload.len() as u32;
+        let mut out = Vec::with_capacity(20 + payload.len());
+        out.extend_from_slice(b"GBST");
+        out.extend_from_slice(&1u32.to_le_bytes());
+        out.extend_from_slice(&gb_model_tag(self.model.unwrap_or(GbModel::Dmg)).to_le_bytes());
+        out.extend_from_slice(&self.rom_crc32().to_le_bytes());
+        out.extend_from_slice(&payload_len.to_le_bytes());
+        out.extend_from_slice(&payload);
+        out
+    }
+
+    pub fn load_state(&mut self, data: &[u8]) -> Result<(), &'static str> {
+        if data.len() < 20 {
+            return Err("state data too short");
+        }
+        if &data[0..4] != b"GBST" {
+            return Err("invalid state magic");
+        }
+        let version = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        if version != 1 {
+            return Err("unsupported state version");
+        }
+        let model = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+        if model != gb_model_tag(self.model.unwrap_or(GbModel::Dmg)) {
+            return Err("model mismatch");
+        }
+        let rom_crc = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+        if rom_crc != self.rom_crc32() {
+            return Err("ROM CRC mismatch");
+        }
+        let payload_len = u32::from_le_bytes([data[16], data[17], data[18], data[19]]) as usize;
+        if data.len() < 20 + payload_len {
+            return Err("state data truncated");
+        }
+
+        let mut r = state::StateReader::new(&data[20..20 + payload_len]);
+        self.bus.deserialize_state(&mut r)?;
+        self.cpu.deserialize_state(&mut r)?;
+        self.ppu.deserialize_state(&mut r)?;
+        self.timer.deserialize_state(&mut r)?;
+        self.serial.deserialize_state(&mut r)?;
+        self.frame_number = r.read_u64()?;
+        self.cgb_ppu_cycle_carry = r.read_u32()?;
+        self.rom_loaded = r.read_bool()?;
+        if r.remaining() != 0 {
+            return Err("state payload has trailing data");
+        }
+        Ok(())
+    }
+
+    fn rom_crc32(&self) -> u32 {
+        state::crc32(self.bus.rom_bytes())
+    }
+
     pub fn take_audio_samples_i16_into(&mut self, out: &mut Vec<i16>) {
         self.bus.take_audio_samples_i16_into(out);
+    }
+}
+
+fn gb_model_tag(model: GbModel) -> u32 {
+    match model {
+        GbModel::Dmg => 0,
+        GbModel::Cgb => 1,
     }
 }
 
@@ -258,5 +335,54 @@ mod tests {
         let frame = emulator.step_frame().expect("frame should step");
         assert!(frame.cycles > 0);
         assert_eq!(frame.frame_number, 1);
+    }
+
+    #[test]
+    fn save_state_roundtrip_restores_cpu_and_memory() {
+        let mut emulator = GbEmulator::new(GbModel::Dmg);
+        let rom = RomImage::from_bytes(vec![0x00; 0x8000]).expect("dummy ROM should be valid");
+        emulator.load_rom(rom).expect("ROM load should succeed");
+        emulator.bus.write8(0xC123, 0x42);
+        emulator.bus.write8(0xFF40, 0x91);
+        emulator.step_frame().expect("frame should step");
+        let expected_frame = emulator.frame_number;
+
+        let state_data = emulator.save_state();
+        assert!(state_data.len() > 20);
+        assert_eq!(&state_data[0..4], b"GBST");
+
+        emulator.bus.write8(0xC123, 0x99);
+        emulator.load_state(&state_data).expect("state should load");
+
+        assert_eq!(emulator.debug_read8(0xC123), 0x42);
+        assert_eq!(emulator.debug_read8(0xFF40), 0x91);
+        assert_eq!(emulator.frame_number, expected_frame);
+    }
+
+    #[test]
+    fn save_state_rejects_wrong_model() {
+        let mut dmg = GbEmulator::new(GbModel::Dmg);
+        dmg.load_rom(RomImage::from_bytes(vec![0x00; 0x8000]).unwrap())
+            .unwrap();
+        let state_data = dmg.save_state();
+
+        let mut cgb = GbEmulator::new(GbModel::Cgb);
+        let mut cgb_rom = vec![0x00; 0x8000];
+        cgb_rom[0x0143] = 0x80;
+        cgb.load_rom(RomImage::from_bytes(cgb_rom).unwrap())
+            .unwrap();
+
+        assert_eq!(cgb.load_state(&state_data), Err("model mismatch"));
+    }
+
+    #[test]
+    fn save_state_rejects_wrong_crc() {
+        let mut emulator = GbEmulator::new(GbModel::Dmg);
+        emulator
+            .load_rom(RomImage::from_bytes(vec![0x00; 0x8000]).unwrap())
+            .unwrap();
+        let mut state_data = emulator.save_state();
+        state_data[12] ^= 0xFF;
+        assert_eq!(emulator.load_state(&state_data), Err("ROM CRC mismatch"));
     }
 }

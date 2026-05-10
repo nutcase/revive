@@ -658,6 +658,82 @@ impl GbBus {
             .and_then(|cartridge| cartridge.ram_data_mut())
     }
 
+    pub fn rom_bytes(&self) -> &[u8] {
+        self.cartridge
+            .as_ref()
+            .map(|cartridge| cartridge.rom_bytes())
+            .unwrap_or(&[])
+    }
+
+    pub fn serialize_state(&self, w: &mut crate::state::StateWriter) {
+        w.write_bool(self.cartridge.is_some());
+        if let Some(cartridge) = self.cartridge.as_ref() {
+            cartridge.serialize_state(w);
+        }
+        w.write_slice(&self.vram);
+        w.write_slice(&self.wram);
+        w.write_slice(&self.oam);
+        w.write_slice(&self.io);
+        w.write_slice(&self.hram);
+        w.write_u8(self.ie);
+        w.write_bool(self.div_reset_requested);
+        w.write_u8(self.joypad_pressed);
+        w.write_bool(self.cgb_mode);
+        w.write_u8(self.vram_bank as u8);
+        w.write_u8(self.wram_bank as u8);
+        w.write_slice(&self.cgb_bg_palette_data);
+        w.write_slice(&self.cgb_obj_palette_data);
+        w.write_u8(self.cgb_bg_palette_index);
+        w.write_u8(self.cgb_obj_palette_index);
+        w.write_bool(self.cgb_double_speed);
+        w.write_bool(self.cgb_key1_prepare);
+        w.write_bool(self.hdma_active);
+        w.write_u16(self.hdma_source);
+        w.write_u16(self.hdma_dest);
+        w.write_u8(self.hdma_blocks_remaining);
+        self.apu.serialize_state(w);
+        w.write_u64(self.debug_vram_write_count);
+        w.write_u64(self.debug_hdma_bytes_copied);
+    }
+
+    pub fn deserialize_state(
+        &mut self,
+        r: &mut crate::state::StateReader<'_>,
+    ) -> Result<(), &'static str> {
+        let has_cartridge = r.read_bool()?;
+        match (has_cartridge, self.cartridge.as_mut()) {
+            (true, Some(cartridge)) => cartridge.deserialize_state(r)?,
+            (false, None) => {}
+            _ => return Err("cartridge state mismatch"),
+        }
+        r.read_into_slice(&mut self.vram)?;
+        r.read_into_slice(&mut self.wram)?;
+        r.read_into_slice(&mut self.oam)?;
+        r.read_into_slice(&mut self.io)?;
+        r.read_into_slice(&mut self.hram)?;
+        self.ie = r.read_u8()?;
+        self.div_reset_requested = r.read_bool()?;
+        self.joypad_pressed = r.read_u8()?;
+        self.cgb_mode = r.read_bool()?;
+        self.vram_bank = usize::from(r.read_u8()? & 0x01);
+        self.wram_bank = usize::from(r.read_u8()? & 0x07).max(1);
+        r.read_into_slice(&mut self.cgb_bg_palette_data)?;
+        r.read_into_slice(&mut self.cgb_obj_palette_data)?;
+        self.cgb_bg_palette_index = r.read_u8()?;
+        self.cgb_obj_palette_index = r.read_u8()?;
+        self.cgb_double_speed = r.read_bool()?;
+        self.cgb_key1_prepare = r.read_bool()?;
+        self.hdma_active = r.read_bool()?;
+        self.hdma_source = r.read_u16()?;
+        self.hdma_dest = r.read_u16()?;
+        self.hdma_blocks_remaining = r.read_u8()?;
+        self.apu.deserialize_state(r)?;
+        self.debug_vram_write_count = r.read_u64()?;
+        self.debug_hdma_bytes_copied = r.read_u64()?;
+        self.update_key1_register();
+        Ok(())
+    }
+
     fn read_joyp(&self) -> u8 {
         let mut value = (self.io[JOYP_INDEX] & 0x30) | 0xC0 | 0x0F;
         let direction_selected = (value & 0x10) == 0;

@@ -40,6 +40,38 @@ impl Mbc3State {
         }
     }
 
+    pub(crate) fn serialize_state(&self, w: &mut crate::state::StateWriter) {
+        w.write_u8(self.rom_bank);
+        w.write_u8(self.ram_or_rtc_select);
+        w.write_bool(self.ram_enabled);
+        w.write_bool(self.has_rtc);
+        w.write_bool(self.latch_armed);
+        w.write_bool(self.latched_valid);
+        self.rtc.serialize_state(w);
+        self.latched_rtc.serialize_state(w);
+    }
+
+    pub(crate) fn deserialize_state(
+        &mut self,
+        r: &mut crate::state::StateReader<'_>,
+    ) -> Result<(), &'static str> {
+        self.rom_bank = r.read_u8()? & 0x7F;
+        if self.rom_bank == 0 {
+            self.rom_bank = 1;
+        }
+        self.ram_or_rtc_select = r.read_u8()?;
+        self.ram_enabled = r.read_bool()?;
+        let has_rtc = r.read_bool()?;
+        if has_rtc != self.has_rtc {
+            return Err("MBC3 RTC capability mismatch");
+        }
+        self.latch_armed = r.read_bool()?;
+        self.latched_valid = r.read_bool()?;
+        self.rtc.deserialize_state(r)?;
+        self.latched_rtc.deserialize_state(r)?;
+        Ok(())
+    }
+
     pub fn write_rom_control(&mut self, addr: u16, value: u8) {
         match addr {
             0x0000..=0x1FFF => {
@@ -155,6 +187,29 @@ impl Mbc3Rtc {
             carry: false,
             last_update: SystemTime::now(),
         }
+    }
+
+    fn serialize_state(&self, w: &mut crate::state::StateWriter) {
+        w.write_u8(self.seconds);
+        w.write_u8(self.minutes);
+        w.write_u8(self.hours);
+        w.write_u16(self.day_counter);
+        w.write_bool(self.halt);
+        w.write_bool(self.carry);
+    }
+
+    fn deserialize_state(
+        &mut self,
+        r: &mut crate::state::StateReader<'_>,
+    ) -> Result<(), &'static str> {
+        self.seconds = r.read_u8()? % 60;
+        self.minutes = r.read_u8()? % 60;
+        self.hours = r.read_u8()? % 24;
+        self.day_counter = r.read_u16()? & 0x01FF;
+        self.halt = r.read_bool()?;
+        self.carry = r.read_bool()?;
+        self.last_update = SystemTime::now();
+        Ok(())
     }
 
     fn tick_to_now(&mut self) {

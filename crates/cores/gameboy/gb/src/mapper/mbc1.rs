@@ -26,6 +26,31 @@ impl Default for Mbc1State {
 }
 
 impl Mbc1State {
+    pub(crate) fn serialize_state(&self, w: &mut crate::state::StateWriter) {
+        w.write_u8(self.rom_bank_low5);
+        w.write_u8(self.bank_high2);
+        w.write_bool(self.ram_enabled);
+        w.write_u8(match self.mode {
+            Mbc1Mode::RomBanking => 0,
+            Mbc1Mode::RamBanking => 1,
+        });
+    }
+
+    pub(crate) fn deserialize_state(
+        &mut self,
+        r: &mut crate::state::StateReader<'_>,
+    ) -> Result<(), &'static str> {
+        self.rom_bank_low5 = r.read_u8()?;
+        self.bank_high2 = r.read_u8()? & 0x03;
+        self.ram_enabled = r.read_bool()?;
+        self.mode = match r.read_u8()? {
+            0 => Mbc1Mode::RomBanking,
+            1 => Mbc1Mode::RamBanking,
+            _ => return Err("invalid MBC1 mode"),
+        };
+        Ok(())
+    }
+
     pub fn write_rom_control(&mut self, addr: u16, value: u8) {
         match addr {
             0x0000..=0x1FFF => {
@@ -62,7 +87,7 @@ impl Mbc1State {
 
     pub fn current_rom_bank(&self, bank_count: usize) -> usize {
         let mut bank = ((self.bank_high2 as usize) << 5) | (self.rom_bank_low5 as usize & 0x1F);
-        if bank % 0x20 == 0 {
+        if bank.is_multiple_of(0x20) {
             bank += 1;
         }
         bank % bank_count.max(1)

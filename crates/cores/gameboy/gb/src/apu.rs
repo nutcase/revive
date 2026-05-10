@@ -213,46 +213,30 @@ impl GbApu {
         io[index] = value;
 
         match index {
-            NR12 => {
-                if (value & 0xF8) == 0 {
-                    self.ch1_on = false;
-                }
+            NR12 if (value & 0xF8) == 0 => {
+                self.ch1_on = false;
             }
-            NR22 => {
-                if (value & 0xF8) == 0 {
-                    self.ch2_on = false;
-                }
+            NR22 if (value & 0xF8) == 0 => {
+                self.ch2_on = false;
             }
-            NR30 => {
-                if (value & 0x80) == 0 {
-                    self.ch3_on = false;
-                    self.ch3_phase = 0.0;
-                }
+            NR30 if (value & 0x80) == 0 => {
+                self.ch3_on = false;
+                self.ch3_phase = 0.0;
             }
-            NR42 => {
-                if (value & 0xF8) == 0 {
-                    self.ch4_on = false;
-                }
+            NR42 if (value & 0xF8) == 0 => {
+                self.ch4_on = false;
             }
-            NR14 => {
-                if (value & 0x80) != 0 {
-                    self.trigger_ch1(io);
-                }
+            NR14 if (value & 0x80) != 0 => {
+                self.trigger_ch1(io);
             }
-            NR24 => {
-                if (value & 0x80) != 0 {
-                    self.trigger_ch2(io);
-                }
+            NR24 if (value & 0x80) != 0 => {
+                self.trigger_ch2(io);
             }
-            NR34 => {
-                if (value & 0x80) != 0 {
-                    self.trigger_ch3(io);
-                }
+            NR34 if (value & 0x80) != 0 => {
+                self.trigger_ch3(io);
             }
-            NR44 => {
-                if (value & 0x80) != 0 {
-                    self.trigger_ch4(io);
-                }
+            NR44 if (value & 0x80) != 0 => {
+                self.trigger_ch4(io);
             }
             _ => {}
         }
@@ -282,6 +266,86 @@ impl GbApu {
 
     pub fn audio_sample_rate_hz(&self) -> u32 {
         AUDIO_SAMPLE_RATE_HZ
+    }
+
+    pub fn serialize_state(&self, w: &mut crate::state::StateWriter) {
+        w.write_u32(self.cycle_accum);
+        w.write_f32(self.frame_seq_accum);
+        w.write_u8(self.frame_seq_step);
+        w.write_bool(self.master_enabled);
+        w.write_bool(self.ch1_on);
+        w.write_bool(self.ch2_on);
+        w.write_bool(self.ch3_on);
+        w.write_bool(self.ch4_on);
+        w.write_f32(self.ch1_phase);
+        w.write_f32(self.ch2_phase);
+        w.write_f32(self.ch3_phase);
+        w.write_u32(self.ch4_phase);
+        w.write_u16(self.ch4_lfsr);
+        w.write_u16(self.ch1_length);
+        w.write_u16(self.ch2_length);
+        w.write_u16(self.ch3_length);
+        w.write_u16(self.ch4_length);
+        w.write_u16(self.ch1_shadow_freq);
+        w.write_u8(self.ch1_sweep_counter);
+        w.write_u8(self.ch1_volume);
+        w.write_u8(self.ch2_volume);
+        w.write_u8(self.ch4_volume);
+        w.write_u8(self.ch1_env_period);
+        w.write_u8(self.ch2_env_period);
+        w.write_u8(self.ch4_env_period);
+        w.write_u8(self.ch1_env_counter);
+        w.write_u8(self.ch2_env_counter);
+        w.write_u8(self.ch4_env_counter);
+        w.write_bool(self.hpf_enabled);
+        w.write_f32(self.hpf_alpha);
+        w.write_f32(self.hpf_prev_in_l);
+        w.write_f32(self.hpf_prev_in_r);
+        w.write_f32(self.hpf_prev_out_l);
+        w.write_f32(self.hpf_prev_out_r);
+        w.write_vec_i16(&self.audio_samples);
+    }
+
+    pub fn deserialize_state(
+        &mut self,
+        r: &mut crate::state::StateReader<'_>,
+    ) -> Result<(), &'static str> {
+        self.cycle_accum = r.read_u32()?;
+        self.frame_seq_accum = r.read_f32()?;
+        self.frame_seq_step = r.read_u8()? & 0x07;
+        self.master_enabled = r.read_bool()?;
+        self.ch1_on = r.read_bool()?;
+        self.ch2_on = r.read_bool()?;
+        self.ch3_on = r.read_bool()?;
+        self.ch4_on = r.read_bool()?;
+        self.ch1_phase = r.read_f32()?;
+        self.ch2_phase = r.read_f32()?;
+        self.ch3_phase = r.read_f32()?;
+        self.ch4_phase = r.read_u32()?;
+        self.ch4_lfsr = r.read_u16()?;
+        self.ch1_length = r.read_u16()?;
+        self.ch2_length = r.read_u16()?;
+        self.ch3_length = r.read_u16()?;
+        self.ch4_length = r.read_u16()?;
+        self.ch1_shadow_freq = r.read_u16()?;
+        self.ch1_sweep_counter = r.read_u8()?;
+        self.ch1_volume = r.read_u8()? & 0x0F;
+        self.ch2_volume = r.read_u8()? & 0x0F;
+        self.ch4_volume = r.read_u8()? & 0x0F;
+        self.ch1_env_period = r.read_u8()? & 0x07;
+        self.ch2_env_period = r.read_u8()? & 0x07;
+        self.ch4_env_period = r.read_u8()? & 0x07;
+        self.ch1_env_counter = r.read_u8()?;
+        self.ch2_env_counter = r.read_u8()?;
+        self.ch4_env_counter = r.read_u8()?;
+        self.hpf_enabled = r.read_bool()?;
+        self.hpf_alpha = r.read_f32()?;
+        self.hpf_prev_in_l = r.read_f32()?;
+        self.hpf_prev_in_r = r.read_f32()?;
+        self.hpf_prev_out_l = r.read_f32()?;
+        self.hpf_prev_out_r = r.read_f32()?;
+        self.audio_samples = r.read_vec_i16()?;
+        Ok(())
     }
 
     fn write_nr52(&mut self, value: u8, io: &mut [u8; 128]) {

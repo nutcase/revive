@@ -13,6 +13,18 @@ impl GbSerial {
         self.transfer_cycle_acc = 0;
     }
 
+    pub fn serialize_state(&self, w: &mut crate::state::StateWriter) {
+        w.write_u32(self.transfer_cycle_acc);
+    }
+
+    pub fn deserialize_state(
+        &mut self,
+        r: &mut crate::state::StateReader<'_>,
+    ) -> Result<(), &'static str> {
+        self.transfer_cycle_acc = r.read_u32()?;
+        Ok(())
+    }
+
     pub fn step(&mut self, cycles: u32, bus: &mut GbBus) {
         let sc = bus.serial_sc();
         let transfer_active = (sc & 0x80) != 0;

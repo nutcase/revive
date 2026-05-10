@@ -1096,6 +1096,44 @@ impl GbCpu {
     pub fn debug_halted(&self) -> bool {
         self.halted
     }
+
+    pub fn serialize_state(&self, w: &mut crate::state::StateWriter) {
+        w.write_u8(self.registers.a);
+        w.write_u8(self.registers.f);
+        w.write_u8(self.registers.b);
+        w.write_u8(self.registers.c);
+        w.write_u8(self.registers.d);
+        w.write_u8(self.registers.e);
+        w.write_u8(self.registers.h);
+        w.write_u8(self.registers.l);
+        w.write_u16(self.registers.sp);
+        w.write_u16(self.registers.pc);
+        w.write_bool(self.halted);
+        w.write_bool(self.ime);
+        w.write_u8(self.ime_enable_delay);
+        w.write_bool(self.halt_bug);
+    }
+
+    pub fn deserialize_state(
+        &mut self,
+        r: &mut crate::state::StateReader<'_>,
+    ) -> Result<(), &'static str> {
+        self.registers.a = r.read_u8()?;
+        self.registers.f = r.read_u8()? & 0xF0;
+        self.registers.b = r.read_u8()?;
+        self.registers.c = r.read_u8()?;
+        self.registers.d = r.read_u8()?;
+        self.registers.e = r.read_u8()?;
+        self.registers.h = r.read_u8()?;
+        self.registers.l = r.read_u8()?;
+        self.registers.sp = r.read_u16()?;
+        self.registers.pc = r.read_u16()?;
+        self.halted = r.read_bool()?;
+        self.ime = r.read_bool()?;
+        self.ime_enable_delay = r.read_u8()?;
+        self.halt_bug = r.read_bool()?;
+        Ok(())
+    }
 }
 
 fn fallback_opcode_len(opcode: u8) -> u8 {

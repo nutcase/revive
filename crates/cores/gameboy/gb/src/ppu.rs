@@ -72,6 +72,22 @@ impl GbPpu {
         self.update_stat(bus);
     }
 
+    pub fn serialize_state(&self, w: &mut crate::state::StateWriter) {
+        w.write_u32(self.line_cycles);
+        w.write_bool(self.stat_irq_latched);
+        w.write_slice(&self.frame_rgba8888);
+    }
+
+    pub fn deserialize_state(
+        &mut self,
+        r: &mut crate::state::StateReader<'_>,
+    ) -> Result<(), &'static str> {
+        self.line_cycles = r.read_u32()?;
+        self.stat_irq_latched = r.read_bool()?;
+        r.read_into_slice(&mut self.frame_rgba8888)?;
+        Ok(())
+    }
+
     pub fn step(&mut self, cycles: u32, bus: &mut GbBus) -> bool {
         if (bus.ppu_lcdc() & LCDC_ENABLE) == 0 {
             self.line_cycles = 0;
