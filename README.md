@@ -1,10 +1,19 @@
 # Revive
 
-Revive is an integrated SDL2 frontend for several vendored Rust emulator cores.
+Revive is a Rust emulator development workspace and integrated SDL2/OpenGL/egui
+frontend for several vendored emulator cores. It is built for working on classic
+console emulation, save states, memory maps, controller input, audio/video
+timing, cheat search, and frontend integration in one local repository.
 
 Only one title runs at a time. Revive selects the target system from the ROM
 extension or an explicit `--system` option, and `revive-core` hides the API
 differences between the underlying emulator cores.
+
+The repository is useful for people searching for Rust emulator projects,
+multi-system emulator frontends, NES/SNES/Game Boy/GBA emulator development,
+Sega 8-bit and Mega Drive emulation, PC Engine emulation, SDL2 emulators,
+OpenGL frame presentation, egui tooling, save-state serialization, cartridge
+mappers, PPU/video timing, APU/audio timing, and cheat or RAM search tools.
 
 ## Supported Systems
 
@@ -19,6 +28,27 @@ differences between the underlying emulator cores.
 | Game Boy | `gb`, `gameboy`, `game-boy` | `.gb` |
 | Game Boy Color | `gbc`, `gameboycolor`, `game-boy-color`, `gameboy-color` | `.gbc` |
 | Game Boy Advance | `gba`, `gameboyadvance`, `game-boy-advance`, `gameboy-advance` | `.gba` |
+
+## Emulator Development
+
+Revive is intentionally organized so emulator development work can happen at
+the hardware-core layer while still being exercised through a shared desktop
+frontend.
+
+Good entry points:
+
+- Emulator cores: `crates/cores/*`
+- System adapters and common runtime API: `crates/revive-core`
+- Cheat search and memory editing model: `crates/revive-cheat`
+- SDL2/OpenGL/egui frontend loop: `crates/revive-cli`
+- Save-state examples: `crates/cores/gameboy/gb/src/state.rs` and `crates/cores/gameboy/gba/src/state.rs`
+- Input, frame, audio, memory, save-state, and persistent-save integration:
+  `crates/revive-core/src/adapters/`
+
+Common emulator topics represented in the codebase include CPU stepping,
+PPU/VDP rendering, APU/PSG audio, cartridge mappers, RAM and VRAM regions,
+save-state formats, ROM detection, controller mapping, frame pacing, and
+debugging through cheat/memory tools.
 
 ## Workspace Layout
 
@@ -384,6 +414,7 @@ renders the game screen into the remaining area while preserving aspect ratio.
 
 ```sh
 cargo fmt
+cargo clippy -p revive-core -p revive-cheat -p revive-cli --all-targets --no-deps -- -D warnings
 cargo check -p revive-cli
 cargo check --target aarch64-apple-darwin -p revive-cli
 cargo test -p revive-core
@@ -409,7 +440,6 @@ cargo test -p emulator-gba
 ## Known Limitations
 
 - Only one ROM can run at a time.
-- GB/GBC save states are not supported yet.
-- GBA cheat memory regions are not currently exposed.
 - Without `--cheats`, the Save action writes to `cheats/<system>/<rom>/cheats.json`.
 - Cores are vendored under `crates/cores/`, so upstream core repository changes must be synced manually.
+- Emulator accuracy, timing, and mapper behavior are still validated system by system; prefer focused regression tests for hardware fixes.
