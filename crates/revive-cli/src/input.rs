@@ -1,5 +1,5 @@
 use revive_core::{CoreInstance, SystemKind, VirtualButton};
-use sdl2::keyboard::{KeyboardState, Keycode, Scancode};
+use sdl3::keyboard::{KeyboardState, Keycode, Scancode};
 
 const INPUT_BUTTONS: [VirtualButton; 15] = [
     VirtualButton::Up,
@@ -39,7 +39,7 @@ impl InputState {
 }
 pub(crate) fn sync_keyboard_input(
     core: &mut CoreInstance,
-    event_pump: &sdl2::EventPump,
+    event_pump: &sdl3::EventPump,
     event_input: &InputState,
 ) {
     let system = core.system();

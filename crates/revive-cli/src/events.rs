@@ -1,34 +1,22 @@
 use crate::cheat_panel::{CheatPanel, MemorySnapshot};
+use crate::egui_input::EguiInput;
 use crate::hud::HudToast;
 use crate::input::{button_label, keycode_button, InputState};
 use crate::state::handle_state_key;
-use egui_sdl2_gl::painter::Painter;
-use egui_sdl2_gl::EguiStateHandler;
 use revive_core::CoreInstance;
-use sdl2::event::{Event, WindowEvent};
-use sdl2::keyboard::{Keycode, Mod, Scancode};
-use sdl2::video::Window;
+use sdl3::event::{Event, WindowEvent};
+use sdl3::keyboard::{Keycode, Mod, Scancode};
 
 pub(crate) enum EventLoopAction {
     Continue,
     Exit,
 }
 
-pub(crate) fn update_egui_time(egui_state: &mut EguiStateHandler) {
-    egui_state.input.time = Some(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs_f64(),
-    );
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn process_sdl_events(
-    event_pump: &mut sdl2::EventPump,
-    window: &Window,
-    painter: &mut Painter,
-    egui_state: &mut EguiStateHandler,
+    event_pump: &mut sdl3::EventPump,
+    video: &sdl3::VideoSubsystem,
+    egui_input: &mut EguiInput,
     egui_ctx: &egui::Context,
     core: &mut CoreInstance,
     cheat_panel: &mut CheatPanel,
@@ -38,9 +26,7 @@ pub(crate) fn process_sdl_events(
 ) -> EventLoopAction {
     for event in event_pump.poll_iter() {
         if cheat_panel.is_visible() {
-            if let Some(filtered) = filter_event_for_ascii_text_input(&event) {
-                egui_state.process_input(window, filtered, painter);
-            }
+            egui_input.handle_event(&event, video);
         }
 
         if matches!(
@@ -151,7 +137,7 @@ fn handle_key_down(
     if handle_state_key(core, key, scancode, keymod, hud_toast) {
         return;
     }
-    if cheat_panel.is_visible() && egui_ctx.wants_keyboard_input() {
+    if cheat_panel.is_visible() && egui_ctx.egui_wants_keyboard_input() {
         return;
     }
     if let Some(button) = keycode_button(core.system(), key) {
@@ -172,7 +158,7 @@ fn handle_key_up(
     key: Keycode,
     input_debug: bool,
 ) {
-    if cheat_panel.is_visible() && egui_ctx.wants_keyboard_input() {
+    if cheat_panel.is_visible() && egui_ctx.egui_wants_keyboard_input() {
         return;
     }
     if let Some(button) = keycode_button(core.system(), key) {
@@ -191,29 +177,6 @@ fn toggle_cheat_panel(core: &CoreInstance, cheat_panel: &mut CheatPanel) {
     } else {
         let live_memory = MemorySnapshot::capture(core);
         cheat_panel.toggle(&live_memory);
-    }
-}
-
-fn filter_event_for_ascii_text_input(event: &Event) -> Option<Event> {
-    match event {
-        Event::TextEditing { .. } => None,
-        Event::TextInput {
-            timestamp,
-            window_id,
-            text,
-        } => {
-            let ascii_text: String = text.chars().filter(|ch| ch.is_ascii()).collect();
-            if ascii_text.is_empty() {
-                None
-            } else {
-                Some(Event::TextInput {
-                    timestamp: *timestamp,
-                    window_id: *window_id,
-                    text: ascii_text,
-                })
-            }
-        }
-        _ => Some(event.clone()),
     }
 }
 

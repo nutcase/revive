@@ -4,28 +4,27 @@ use std::path::{Path, PathBuf};
 
 mod audio;
 mod cheat_panel;
+mod egui_input;
 mod events;
 mod frame_clock;
-mod gl_game;
 mod hud;
 mod input;
 mod render;
 mod session;
 mod state;
+mod wgpu_game;
 mod window;
 
 use audio::{feed_audio, open_audio_output};
 use cheat_panel::{CheatPanel, MemorySnapshot};
-use egui_sdl2_gl::gl;
-use egui_sdl2_gl::{DpiScaling, ShaderVersion};
-use events::{process_sdl_events, update_egui_time, EventLoopAction};
+use egui_input::EguiInput;
+use events::{process_sdl_events, EventLoopAction};
 use frame_clock::FrameClock;
 use hud::HudToast;
 use input::{release_keyboard_input, sync_keyboard_input, InputState};
-use render::RenderState;
+use render::{RenderState, UiRenderData};
 use revive_cheat::CheatManager;
 use revive_core::{CoreInstance, SystemKind, ROM_EXTENSIONS};
-use sdl2::video::{GLProfile, SwapInterval};
 use session::{print_session_banner, CheatPaths};
 use window::bring_window_to_front;
 
@@ -178,16 +177,11 @@ fn run_sdl_loop(
     cheat_path: &Path,
     options: &Options,
 ) -> Result<(), Box<dyn Error>> {
-    sdl2::hint::set("SDL_DISABLE_IMMINTRIN_H", "1");
-    sdl2::hint::set("SDL_MAC_CTRL_CLICK_EMULATE_RIGHT_CLICK", "0");
+    sdl3::hint::set("SDL_DISABLE_IMMINTRIN_H", "1");
+    sdl3::hint::set("SDL_MAC_CTRL_CLICK_EMULATE_RIGHT_CLICK", "0");
 
-    let sdl = sdl2::init().map_err(sdl_error)?;
-    let video = sdl.video().map_err(sdl_error)?;
-    let gl_attr = video.gl_attr();
-    gl_attr.set_context_profile(GLProfile::Core);
-    gl_attr.set_context_version(3, 2);
-    gl_attr.set_double_buffer(true);
-    gl_attr.set_multisample_samples(0);
+    let sdl = sdl3::init().map_err(sdl_error)?;
+    let mut video = sdl.video().map_err(sdl_error)?;
 
     let (frame_width, frame_height) = {
         let frame = core.frame();
@@ -195,36 +189,31 @@ fn run_sdl_loop(
     };
 
     let window_title = format!("Revive - {} - {}", core.system().label(), core.title());
-    let initial_render_state =
-        RenderState::new(frame_width, frame_height, PANEL_WIDTH_DEFAULT as u32);
-    let (initial_w, initial_h) = initial_render_state.initial_window_size();
-    let mut window = video
-        .window(&window_title, initial_w, initial_h)
+    let (initial_w, initial_h) = RenderState::initial_window_size(frame_width, frame_height);
+    let mut window_builder = video.window(&window_title, initial_w, initial_h);
+    window_builder
         .position_centered()
         .resizable()
-        .opengl()
+        .high_pixel_density();
+    #[cfg(target_os = "macos")]
+    window_builder.metal_view();
+    let mut window = window_builder
         .build()
         .map_err(|err| io::Error::other(err.to_string()))?;
 
-    let gl_context = window
-        .gl_create_context()
-        .map_err(|err| io::Error::other(err.to_string()))?;
-    window
-        .gl_make_current(&gl_context)
-        .map_err(|err| io::Error::other(err.to_string()))?;
-    gl::load_with(|name| video.gl_get_proc_address(name) as *const _);
-    let _ = video.gl_set_swap_interval(SwapInterval::Immediate);
-
     bring_window_to_front(&mut window);
-    let (mut painter, mut egui_state) =
-        egui_sdl2_gl::with_sdl2(&window, ShaderVersion::Default, DpiScaling::Default);
-    let egui_ctx = egui::Context::default();
+    let mut egui_input = EguiInput::new(&window);
+    let egui_ctx = egui_input.context();
     let text_input = video.text_input();
     let mut text_input_active = false;
-    text_input.stop();
+    text_input.stop(&window);
 
-    let mut render_state = initial_render_state;
-    render_state.initialize_gl();
+    let mut render_state = RenderState::new(
+        &window,
+        frame_width,
+        frame_height,
+        PANEL_WIDTH_DEFAULT as u32,
+    )?;
     render_state.resize_window_for_panel(&mut window, false);
 
     let audio_output = if options.no_audio {
@@ -247,20 +236,18 @@ fn run_sdl_loop(
         let should_enable_text_input = cheat_panel.is_visible();
         if should_enable_text_input != text_input_active {
             if should_enable_text_input {
-                text_input.start();
+                text_input.start(&window);
             } else {
-                text_input.stop();
+                text_input.stop(&window);
             }
             text_input_active = should_enable_text_input;
         }
-        update_egui_time(&mut egui_state);
 
         if matches!(
             process_sdl_events(
                 &mut event_pump,
-                &window,
-                &mut painter,
-                &mut egui_state,
+                &video,
+                &mut egui_input,
                 &egui_ctx,
                 &mut core,
                 &mut cheat_panel,
@@ -278,7 +265,7 @@ fn run_sdl_loop(
             prev_panel_visible = cheat_panel.is_visible();
         }
 
-        if cheat_panel.is_visible() && egui_ctx.wants_keyboard_input() {
+        if cheat_panel.is_visible() && egui_ctx.egui_wants_keyboard_input() {
             input_state.clear();
             release_keyboard_input(&mut core);
         } else {
@@ -297,56 +284,57 @@ fn run_sdl_loop(
         }
 
         render_state.upload_core_frame(&mut core, &mut window, cheat_panel.is_visible());
-        render_state.draw_game_view(&window, cheat_panel.is_visible());
 
         let draw_ui = cheat_panel.is_visible() || hud_toast.is_visible();
         if draw_ui {
-            let (win_w, win_h) = render_state.configure_ui_viewport(&window);
-            painter.update_screen_rect((win_w, win_h));
-            egui_state.input.screen_rect = Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(win_w as f32, win_h as f32),
-            ));
-
+            let ctx = egui_input.begin_frame(&window);
             let mut pending_writes = Vec::new();
-            let full_output = egui_ctx.run(egui_state.input.take(), |ctx| {
-                if cheat_panel.is_visible() {
-                    let live_memory = MemorySnapshot::capture(&core);
-                    let panel_resp = egui::SidePanel::right("cheat_panel")
-                        .resizable(true)
-                        .min_width(PANEL_WIDTH_MIN)
-                        .default_width(PANEL_WIDTH_DEFAULT)
-                        .show(ctx, |ui| {
-                            egui::ScrollArea::vertical()
-                                .auto_shrink([false, false])
-                                .show(ui, |ui| {
-                                    pending_writes = cheat_panel.show_panel(
-                                        ui,
-                                        &live_memory,
-                                        &mut cheats,
-                                        Some(cheat_path),
-                                    );
-                                });
-                        });
-                    let actual_w = panel_resp.response.rect.width() as u32;
-                    if actual_w != render_state.panel_width_px() {
-                        render_state.set_panel_width_px(actual_w);
-                        render_state.resize_window_for_panel(&mut window, true);
-                    }
+            if cheat_panel.is_visible() {
+                let live_memory = MemorySnapshot::capture(&core);
+                #[allow(deprecated)]
+                let panel_resp = egui::SidePanel::right("cheat_panel")
+                    .resizable(true)
+                    .min_width(PANEL_WIDTH_MIN)
+                    .default_width(PANEL_WIDTH_DEFAULT)
+                    .show(&ctx, |ui| {
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                pending_writes = cheat_panel.show_panel(
+                                    ui,
+                                    &live_memory,
+                                    &mut cheats,
+                                    Some(cheat_path),
+                                );
+                            });
+                    });
+                let actual_w = (panel_resp.response.rect.width() * ctx.pixels_per_point()) as u32;
+                if actual_w != render_state.panel_width_px() {
+                    render_state.set_panel_width_px(actual_w);
+                    render_state.resize_window_for_panel(&mut window, true);
                 }
-                hud_toast.draw(ctx);
-            });
+            }
+            hud_toast.draw(&ctx);
 
-            let prims = egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
-            painter.paint_jobs(None, full_output.textures_delta, prims);
-            egui_state.process_output(&window, &full_output.platform_output);
+            let full_output = egui_input.end_frame(&mut video);
+            let primitives = egui_input.tessellate(&full_output);
+            render_state.present_frame(
+                &window,
+                cheat_panel.is_visible(),
+                Some(UiRenderData {
+                    textures_delta: &full_output.textures_delta,
+                    primitives: &primitives,
+                    pixels_per_point: ctx.pixels_per_point(),
+                }),
+            )?;
 
             for write in pending_writes {
                 core.write_memory_byte(&write.region, write.offset, write.value);
             }
+        } else {
+            render_state.present_frame(&window, false, None)?;
         }
 
-        window.gl_swap_window();
         if front_retry_frames > 0 {
             bring_window_to_front(&mut window);
             front_retry_frames -= 1;
@@ -367,6 +355,6 @@ fn apply_cheats(core: &mut CoreInstance, cheats: &CheatManager) {
     }
 }
 
-fn sdl_error(message: String) -> io::Error {
-    io::Error::other(message)
+fn sdl_error(message: sdl3::Error) -> io::Error {
+    io::Error::other(message.to_string())
 }

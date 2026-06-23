@@ -1,5 +1,5 @@
 use revive_core::{CoreInstance, SystemKind};
-use sdl2::keyboard::{Keycode, Mod, Scancode};
+use sdl3::keyboard::{Keycode, Mod, Scancode};
 
 use crate::hud::HudToast;
 
@@ -55,25 +55,25 @@ fn state_key_binding(key: Keycode, scancode: Option<Scancode>, keymod: Mod) -> O
     }
 
     let slot = match scancode {
-        Some(Scancode::Num1 | Scancode::Kp1) => 1,
-        Some(Scancode::Num2 | Scancode::Kp2) => 2,
-        Some(Scancode::Num3 | Scancode::Kp3) => 3,
-        Some(Scancode::Num4 | Scancode::Kp4) => 4,
-        Some(Scancode::Num5 | Scancode::Kp5) => 5,
-        Some(Scancode::Num6 | Scancode::Kp6) => 6,
-        Some(Scancode::Num7 | Scancode::Kp7) => 7,
-        Some(Scancode::Num8 | Scancode::Kp8) => 8,
-        Some(Scancode::Num9 | Scancode::Kp9) => 9,
+        Some(Scancode::_1 | Scancode::Kp1) => 1,
+        Some(Scancode::_2 | Scancode::Kp2) => 2,
+        Some(Scancode::_3 | Scancode::Kp3) => 3,
+        Some(Scancode::_4 | Scancode::Kp4) => 4,
+        Some(Scancode::_5 | Scancode::Kp5) => 5,
+        Some(Scancode::_6 | Scancode::Kp6) => 6,
+        Some(Scancode::_7 | Scancode::Kp7) => 7,
+        Some(Scancode::_8 | Scancode::Kp8) => 8,
+        Some(Scancode::_9 | Scancode::Kp9) => 9,
         _ => match key {
-            Keycode::Num1 | Keycode::Kp1 => 1,
-            Keycode::Num2 | Keycode::Kp2 => 2,
-            Keycode::Num3 | Keycode::Kp3 => 3,
-            Keycode::Num4 | Keycode::Kp4 => 4,
-            Keycode::Num5 | Keycode::Kp5 => 5,
-            Keycode::Num6 | Keycode::Kp6 => 6,
-            Keycode::Num7 | Keycode::Kp7 => 7,
-            Keycode::Num8 | Keycode::Kp8 => 8,
-            Keycode::Num9 | Keycode::Kp9 => 9,
+            Keycode::_1 | Keycode::Kp1 => 1,
+            Keycode::_2 | Keycode::Kp2 => 2,
+            Keycode::_3 | Keycode::Kp3 => 3,
+            Keycode::_4 | Keycode::Kp4 => 4,
+            Keycode::_5 | Keycode::Kp5 => 5,
+            Keycode::_6 | Keycode::Kp6 => 6,
+            Keycode::_7 | Keycode::Kp7 => 7,
+            Keycode::_8 | Keycode::Kp8 => 8,
+            Keycode::_9 | Keycode::Kp9 => 9,
             _ => return None,
         },
     };
