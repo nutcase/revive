@@ -60,6 +60,17 @@ impl GbaPpu {
         Ok(())
     }
 
+    /// Do not cross an HBlank or scanline boundary: their DMA/IRQ callbacks
+    /// must run before any further emulated cycles.
+    pub(crate) fn cycles_until_event(&self) -> u32 {
+        let cycle = u32::from(self.line_cycle);
+        if cycle < HBLANK_START_CYCLE {
+            HBLANK_START_CYCLE - cycle
+        } else {
+            CYCLES_PER_SCANLINE - cycle
+        }
+    }
+
     pub fn step(&mut self, cycles: u32, bus: &mut GbaBus) -> PpuStepResult {
         let total_line_cycles = u32::from(self.line_cycle) + cycles;
         let line_advance = total_line_cycles / CYCLES_PER_SCANLINE;

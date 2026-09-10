@@ -1,5 +1,43 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PhaseInputs {
+    fnum: [u16; 4],
+    block: [u8; 4],
+    mul: [u8; 4],
+    detune: [u8; 4],
+    fms: u8,
+    pm_step: u8,
+    pm_sign: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub(super) struct PhaseCache {
+    key: Option<PhaseInputs>,
+    increments: [u32; 4],
+    keycodes: [u8; 4],
+    #[cfg(test)]
+    reference: bool,
+}
+// Cache data is derived, not emulated state. Decode always starts cold, and
+// encoding consumes no bytes so existing MD states remain compatible.
+impl bincode::Encode for PhaseCache {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        _: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        Ok(())
+    }
+}
+impl<Context> bincode::Decode<Context> for PhaseCache {
+    fn decode<D: bincode::de::Decoder<Context = Context>>(
+        _: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        Ok(Self::default())
+    }
+}
+bincode::impl_borrow_decode!(PhaseCache);
+
 impl Default for YmOperator {
     fn default() -> Self {
         Self {
@@ -45,6 +83,7 @@ impl Default for YmChannel {
             ams: 0,
             fms: 0,
             operators: [YmOperator::default(); 4],
+            phase_cache: PhaseCache::default(),
         }
     }
 }
@@ -782,6 +821,87 @@ impl Ym2612 {
             .count()
     }
 
+    fn phase_steps(
+        channel: &mut YmChannel,
+        lfo_pm_step: u8,
+        lfo_pm_sign: bool,
+        channel3_special_mode: bool,
+    ) -> ([u32; 4], [u8; 4]) {
+        #[cfg(test)]
+        if channel.phase_cache.reference {
+            return Self::phase_steps_reference(
+                channel,
+                lfo_pm_step,
+                lfo_pm_sign,
+                channel3_special_mode,
+            );
+        }
+        // Value-keyed caching also covers direct debug changes and restored
+        // state. Ignore LFO steps when PM is disabled to keep that cache hot.
+        let mut key = PhaseInputs {
+            fnum: [channel.fnum; 4],
+            block: [channel.block; 4],
+            mul: channel.operators.map(|op| op.mul),
+            detune: channel.operators.map(|op| op.detune),
+            fms: channel.fms,
+            pm_step: if channel.fms == 0 { 0 } else { lfo_pm_step },
+            pm_sign: channel.fms != 0 && lfo_pm_sign,
+        };
+        if channel3_special_mode {
+            for i in 0..4 {
+                (key.fnum[i], key.block[i]) = Self::operator_fnum_block(channel, i, true);
+            }
+        }
+        if channel.phase_cache.key != Some(key) {
+            let common_pm =
+                Self::lfo_pm_displacement(key.fnum[0], key.fms, key.pm_step, key.pm_sign);
+            for i in 0..4 {
+                let fnum = key.fnum[i];
+                let block = key.block[i];
+                let keycode = Self::block_fnum_keycode(block, fnum);
+                let pm = if fnum == key.fnum[0] {
+                    common_pm
+                } else {
+                    Self::lfo_pm_displacement(fnum, key.fms, key.pm_step, key.pm_sign)
+                };
+                let modulated = (i32::from(fnum) + pm).clamp(0, 0x7FF) as u16;
+                channel.phase_cache.keycodes[i] = keycode;
+                channel.phase_cache.increments[i] =
+                    Self::compute_phase_inc(modulated, block, key.mul[i], key.detune[i], keycode);
+            }
+            channel.phase_cache.key = Some(key);
+        }
+        (channel.phase_cache.increments, channel.phase_cache.keycodes)
+    }
+
+    // Original per-sample computation, independent of cache keys/sharing.
+    #[cfg(test)]
+    fn phase_steps_reference(
+        channel: &YmChannel,
+        step: u8,
+        sign: bool,
+        special: bool,
+    ) -> ([u32; 4], [u8; 4]) {
+        let mut increments = [0; 4];
+        let mut keycodes = [0; 4];
+        for i in 0..4 {
+            let (fnum, block) = Self::operator_fnum_block(channel, i, special);
+            let keycode = Self::block_fnum_keycode(block, fnum);
+            keycodes[i] = keycode;
+            let pm = Self::lfo_pm_displacement(fnum, channel.fms, step, sign);
+            let fnum = (i32::from(fnum) + pm).clamp(0, 0x7ff) as u16;
+            increments[i] = Self::compute_phase_inc(
+                fnum,
+                block,
+                channel.operators[i].mul,
+                channel.operators[i].detune,
+                keycode,
+            );
+        }
+        (increments, keycodes)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn render_channel_sample(
         channel: &mut YmChannel,
         eg_counter: u32,
@@ -792,27 +912,8 @@ impl Ym2612 {
         eg_tick: bool,
         eg_test: bool,
     ) -> i32 {
-        // Compute phase increments and keycodes for each operator
-        let mut op_phase_incs = [0u32; 4];
-        let mut op_keycodes = [0u8; 4];
-        for i in 0..4 {
-            let (fnum, block) = Self::operator_fnum_block(channel, i, channel3_special_mode);
-            let keycode = Self::block_fnum_keycode(block, fnum);
-            op_keycodes[i] = keycode;
-
-            // Apply PM to FNUM
-            let pm_offset = Self::lfo_pm_displacement(fnum, channel.fms, lfo_pm_step, lfo_pm_sign);
-            let modulated_fnum = ((fnum as i32) + pm_offset).clamp(0, 0x7FF) as u16;
-
-            // At HW rate, raw phase inc is used directly (no scaling needed)
-            op_phase_incs[i] = Self::compute_phase_inc(
-                modulated_fnum,
-                block,
-                channel.operators[i].mul,
-                channel.operators[i].detune,
-                keycode,
-            );
-        }
+        let (op_phase_incs, op_keycodes) =
+            Self::phase_steps(channel, lfo_pm_step, lfo_pm_sign, channel3_special_mode);
 
         let alg = channel.algorithm & 0x07;
         let (connect1, connect2, connect3, mem_restore_to, special_alg5) = match alg {
@@ -1422,5 +1523,137 @@ impl Ym2612 {
     pub fn channel_block_and_fnum(&self, channel: usize) -> (u8, u16) {
         let channel = self.channels[channel.min(5)];
         (channel.block, channel.fnum)
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    fn active_chip() -> Ym2612 {
+        let mut ym = Ym2612 {
+            lfo_enabled: true,
+            lfo_rate: 7,
+            ..Default::default()
+        };
+        for (i, channel) in ym.channels.iter_mut().enumerate() {
+            channel.fms = (i + 1) as u8;
+            channel.algorithm = i as u8;
+            for op in &mut channel.operators {
+                op.key_on = true;
+                op.reg_key_on = true;
+                op.envelope_phase = YmEnvelopePhase::Attack;
+                op.envelope_level = 512;
+            }
+        }
+        ym
+    }
+
+    #[test]
+    fn phase_cache_matches_original_across_frequency_modulation_and_operator_changes() {
+        let mut channel = YmChannel::default();
+        for n in 0..8192u32 {
+            channel.fnum = (n.wrapping_mul(71) & 2047) as u16;
+            channel.block = (n & 7) as u8;
+            channel.special_fnum = [
+                channel.fnum ^ 0x7ff,
+                channel.fnum ^ 0x345,
+                channel.fnum ^ 0x456,
+            ];
+            channel.special_block = [0, 3, 7];
+            channel.fms = ((n >> 3) & 7) as u8;
+            for (i, op) in channel.operators.iter_mut().enumerate() {
+                op.mul = ((n + i as u32) & 15) as u8;
+                op.detune = ((n + i as u32) & 7) as u8;
+            }
+            for special in [false, true] {
+                let step = ((n >> 6) & 7) as u8;
+                let sign = n & 512 != 0;
+                let expected = Ym2612::phase_steps_reference(&channel, step, sign, special);
+                assert_eq!(
+                    Ym2612::phase_steps(&mut channel, step, sign, special),
+                    expected
+                );
+                assert_eq!(
+                    Ym2612::phase_steps(&mut channel, step, sign, special),
+                    expected
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cached_fm_pcm_and_state_match_original_through_writes_and_restore() {
+        let mut cached = active_chip();
+        let mut reference = cached.clone();
+        for ch in &mut reference.channels {
+            ch.phase_cache.reference = true;
+        }
+        let mut audible = false;
+        for n in 0..16384u32 {
+            if n % 257 == 0 {
+                let k = n / 257;
+                for ym in [&mut cached, &mut reference] {
+                    // Public register path: pitch, MUL/detune, sensitivity,
+                    // algorithms, channel3 special mode and CSM mode toggles.
+                    for (bank, reg, value) in [
+                        (0, 0xa2, k as u8 * 3),
+                        (0, 0xa6, (k as u8) & 63),
+                        (1, 0x30, (k as u8).wrapping_mul(17)),
+                        (0, 0xb6, 0xc0 | (k as u8 & 7)),
+                        (0, 0xb2, (k as u8) & 7),
+                        (0, 0x27, ((k as u8) & 3) << 6),
+                        (0, 0xa9, k as u8),
+                        (0, 0xad, (k as u8) & 63),
+                    ] {
+                        ym.write_port(bank * 2, reg);
+                        ym.write_port(bank * 2 + 1, value);
+                    }
+                }
+            }
+            let a = cached.render_one_hw_sample();
+            let b = reference.render_one_hw_sample();
+            audible |= a != (0, 0);
+            assert_eq!(a, b, "sample {n}");
+            if n == 8192 {
+                let bytes = bincode::encode_to_vec(&cached, bincode::config::standard()).unwrap();
+                assert_eq!(
+                    bytes,
+                    bincode::encode_to_vec(&reference, bincode::config::standard()).unwrap()
+                );
+                let (restored, consumed): (Ym2612, usize) =
+                    bincode::decode_from_slice(&bytes, bincode::config::standard()).unwrap();
+                assert_eq!(consumed, bytes.len());
+                assert!(
+                    restored
+                        .channels
+                        .iter()
+                        .all(|ch| ch.phase_cache.key.is_none())
+                );
+                cached = restored;
+            }
+        }
+        assert!(audible);
+    }
+
+    #[test]
+    #[ignore = "release performance measurement"]
+    fn benchmark_fm_phase_cache() {
+        for reference in [true, false] {
+            let mut ym = active_chip();
+            for ch in &mut ym.channels {
+                ch.phase_cache.reference = reference;
+            }
+            let start = std::time::Instant::now();
+            let mut checksum = 0i64;
+            for _ in 0..532670 {
+                let sample = std::hint::black_box(ym.render_one_hw_sample());
+                checksum += i64::from(sample.0) + i64::from(sample.1);
+            }
+            eprintln!(
+                "FM reference={reference}: {:.3}ms checksum={checksum}",
+                start.elapsed().as_secs_f64() * 1000.0
+            );
+        }
     }
 }

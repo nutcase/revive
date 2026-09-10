@@ -26,6 +26,10 @@ impl HudToast {
             return;
         }
 
+        if let Some(expires_at) = self.expires_at {
+            ctx.request_repaint_after(expires_at.saturating_duration_since(Instant::now()));
+        }
+
         egui::Area::new(egui::Id::new("state_hud_toast"))
             .anchor(egui::Align2::LEFT_TOP, egui::vec2(12.0, 12.0))
             .interactable(false)
