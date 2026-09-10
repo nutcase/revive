@@ -28,63 +28,72 @@ pub fn crc32(data: &[u8]) -> u32 {
 }
 
 pub struct StateWriter {
-    buf: Vec<u8>,
+    buf: Option<Vec<u8>>,
+    len: usize,
+}
+
+impl Default for StateWriter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StateWriter {
     pub fn new() -> Self {
+        Self::with_capacity(600 * 1024)
+    }
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
-            buf: Vec::with_capacity(600 * 1024),
+            buf: Some(Vec::with_capacity(capacity)),
+            len: 0,
         }
     }
-
+    /// Traverse the same serialization layout without allocating or copying payloads.
+    pub(crate) fn counting() -> Self {
+        Self { buf: None, len: 0 }
+    }
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
     pub fn into_vec(self) -> Vec<u8> {
-        self.buf
+        self.buf.expect("counting writer has no bytes")
     }
-
-    pub fn write_u8(&mut self, v: u8) {
-        self.buf.push(v);
-    }
-
-    pub fn write_i8(&mut self, v: i8) {
-        self.buf.push(v as u8);
-    }
-
-    pub fn write_u16(&mut self, v: u16) {
-        self.buf.extend_from_slice(&v.to_le_bytes());
-    }
-
-    pub fn write_i16(&mut self, v: i16) {
-        self.buf.extend_from_slice(&v.to_le_bytes());
-    }
-
-    pub fn write_u32(&mut self, v: u32) {
-        self.buf.extend_from_slice(&v.to_le_bytes());
-    }
-
-    pub fn write_i32(&mut self, v: i32) {
-        self.buf.extend_from_slice(&v.to_le_bytes());
-    }
-
-    pub fn write_u64(&mut self, v: u64) {
-        self.buf.extend_from_slice(&v.to_le_bytes());
-    }
-
-    pub fn write_f32(&mut self, v: f32) {
-        self.buf.extend_from_slice(&v.to_le_bytes());
-    }
-
-    pub fn write_bool(&mut self, v: bool) {
-        self.buf.push(if v { 1 } else { 0 });
-    }
-
     pub fn write_slice(&mut self, data: &[u8]) {
-        self.buf.extend_from_slice(data);
+        self.len += data.len();
+        if let Some(buf) = &mut self.buf {
+            buf.extend_from_slice(data);
+        }
     }
-
+    pub fn write_u8(&mut self, v: u8) {
+        self.write_slice(&[v]);
+    }
+    pub fn write_i8(&mut self, v: i8) {
+        self.write_u8(v as u8);
+    }
+    pub fn write_u16(&mut self, v: u16) {
+        self.write_slice(&v.to_le_bytes());
+    }
+    pub fn write_i16(&mut self, v: i16) {
+        self.write_slice(&v.to_le_bytes());
+    }
+    pub fn write_u32(&mut self, v: u32) {
+        self.write_slice(&v.to_le_bytes());
+    }
+    pub fn write_i32(&mut self, v: i32) {
+        self.write_slice(&v.to_le_bytes());
+    }
+    pub fn write_u64(&mut self, v: u64) {
+        self.write_slice(&v.to_le_bytes());
+    }
+    pub fn write_f32(&mut self, v: f32) {
+        self.write_slice(&v.to_le_bytes());
+    }
+    pub fn write_bool(&mut self, v: bool) {
+        self.write_u8(u8::from(v));
+    }
     pub fn write_vec_u8(&mut self, data: &[u8]) {
         self.write_u32(data.len() as u32);
-        self.buf.extend_from_slice(data);
+        self.write_slice(data);
     }
 }
 
@@ -233,7 +242,7 @@ mod tests {
         w.write_u32(0xDEAD_BEEF);
         w.write_i32(-100_000);
         w.write_u64(0x0102_0304_0506_0708);
-        w.write_f32(3.14);
+        w.write_f32(1.25);
         w.write_bool(true);
         w.write_bool(false);
         w.write_slice(&[1, 2, 3]);
@@ -248,7 +257,7 @@ mod tests {
         assert_eq!(r.read_u32().unwrap(), 0xDEAD_BEEF);
         assert_eq!(r.read_i32().unwrap(), -100_000);
         assert_eq!(r.read_u64().unwrap(), 0x0102_0304_0506_0708);
-        assert!((r.read_f32().unwrap() - 3.14).abs() < 1e-6);
+        assert!((r.read_f32().unwrap() - 1.25).abs() < 1e-6);
         assert!(r.read_bool().unwrap());
         assert!(!r.read_bool().unwrap());
         let mut buf = [0u8; 3];

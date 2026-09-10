@@ -3,6 +3,9 @@ mod cpu;
 #[cfg(test)]
 mod performance_tests;
 mod ppu;
+mod render_objects;
+#[cfg(test)]
+mod render_reference;
 pub mod state;
 mod timer;
 mod vram_snapshots;
@@ -135,6 +138,12 @@ struct TextBgLayer {
     priority: u8,
 }
 
+#[derive(Default, Clone, Copy)]
+struct TextBgRowCache {
+    key: Option<(u32, u32)>,
+    colors: [Option<u16>; 8],
+}
+
 #[derive(Debug, Clone, Copy)]
 struct AffineBgLayer {
     bg: u8,
@@ -154,7 +163,7 @@ enum BgLayer {
     Affine(AffineBgLayer),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ObjPixel {
     obj_index: usize,
     color: u16,
@@ -213,6 +222,9 @@ pub struct GbaEmulator {
     timer: GbaTimer,
     frame_number: u64,
     rom_loaded: bool,
+    rom_crc: OnceLock<u32>,
+    #[cfg(test)]
+    single_cycle_halt: bool,
 }
 
 impl GbaEmulator {
@@ -346,27 +358,46 @@ impl GbaEmulator {
         self.bus.current_audio_sample_rate_hz()
     }
 
-    fn serialize_state_payload(&self) -> Vec<u8> {
-        let mut w = state::StateWriter::new();
-        self.bus.serialize_state(&mut w);
-        self.cpu.serialize_state(&mut w);
-        self.ppu.serialize_state(&mut w);
-        self.timer.serialize_state(&mut w);
+    fn step_cpu_and_timers(&mut self, remaining: u32) -> u32 {
+        let batch_halt = self.cpu.waiting_for_interrupt(&self.bus);
+        #[cfg(test)]
+        let batch_halt = batch_halt && !self.single_cycle_halt;
+        if batch_halt {
+            let cycles = remaining
+                .min(self.ppu.cycles_until_event())
+                .min(self.timer.cycles_until_event(&self.bus));
+            self.timer.step_halted(cycles, &mut self.bus);
+            cycles
+        } else {
+            let cycles = self.cpu.step(&mut self.bus);
+            self.timer.step(cycles, &mut self.bus);
+            cycles
+        }
+    }
+
+    fn write_state_payload(&self, w: &mut state::StateWriter) {
+        self.bus.serialize_state(w);
+        self.cpu.serialize_state(w);
+        self.ppu.serialize_state(w);
+        self.timer.serialize_state(w);
         w.write_u64(self.frame_number);
-        w.into_vec()
+    }
+
+    fn state_payload_len(&self) -> usize {
+        let mut w = state::StateWriter::counting();
+        self.write_state_payload(&mut w);
+        w.len()
     }
 
     pub fn save_state(&self) -> Vec<u8> {
-        let payload = self.serialize_state_payload();
-        let rom_crc = self.rom_crc32();
-        let payload_len = payload.len() as u32;
-        let mut out = Vec::with_capacity(16 + payload.len());
-        out.extend_from_slice(b"GBAS");
-        out.extend_from_slice(&1u32.to_le_bytes()); // version
-        out.extend_from_slice(&rom_crc.to_le_bytes());
-        out.extend_from_slice(&payload_len.to_le_bytes());
-        out.extend_from_slice(&payload);
-        out
+        let payload_len = self.state_payload_len();
+        let mut w = state::StateWriter::with_capacity(16 + payload_len);
+        w.write_slice(b"GBAS");
+        w.write_u32(1);
+        w.write_u32(self.rom_crc32());
+        w.write_u32(payload_len as u32);
+        self.write_state_payload(&mut w);
+        w.into_vec()
     }
 
     pub fn load_state(&mut self, data: &[u8]) -> Result<(), &'static str> {
@@ -389,7 +420,7 @@ impl GbaEmulator {
             return Err("state data truncated");
         }
         let payload = &data[16..16 + payload_len];
-        let current_payload_len = self.serialize_state_payload().len();
+        let current_payload_len = self.state_payload_len();
         let upgraded_payload =
             GbaBus::maybe_upgrade_legacy_state_payload(payload, current_payload_len);
         let payload = upgraded_payload.as_deref().unwrap_or(payload);
@@ -403,7 +434,9 @@ impl GbaEmulator {
     }
 
     fn rom_crc32(&self) -> u32 {
-        state::crc32(self.bus.rom_bytes())
+        *self
+            .rom_crc
+            .get_or_init(|| state::crc32(self.bus.rom_bytes()))
     }
 
     pub fn frame_rgba8888(&self) -> Vec<u8> {
@@ -484,15 +517,11 @@ impl GbaEmulator {
             return;
         }
 
+        let objects = (y_dispcnt & 0x9000 != 0)
+            .then(|| self.render_objects_for_line(y, y_dispcnt, mosaic, obj_attrs, obj_affine));
+
         // 1. Build window mask for this scanline
-        self.build_window_masks_for_line(
-            y,
-            y_dispcnt,
-            mosaic,
-            &mut frame.window_masks,
-            obj_attrs,
-            obj_affine,
-        );
+        self.build_window_masks_for_line(y, y_dispcnt, &mut frame.window_masks, objects.as_ref());
 
         // 2. Render BG tiles for this scanline
         let backdrop = self.read_bg_palette_color_for_line(y, 0);
@@ -571,9 +600,7 @@ impl GbaEmulator {
             &mut frame.second_layer_ids,
             &mut frame.obj_semitrans,
             &frame.window_masks,
-            mosaic,
-            obj_attrs,
-            obj_affine,
+            objects.as_ref(),
         );
 
         // 4. Apply color effects for this scanline
@@ -633,7 +660,14 @@ impl GbaEmulator {
         }
     }
 
-    fn sample_text_bg_color(&self, line: u32, layer: &TextBgLayer, x: u32, y: u32) -> Option<u16> {
+    fn sample_text_bg_color_cached(
+        &self,
+        line: u32,
+        layer: &TextBgLayer,
+        x: u32,
+        y: u32,
+        cache: &mut TextBgRowCache,
+    ) -> Option<u16> {
         let size = ((layer.cnt >> 14) & 0x3) as u8;
         let (map_w, map_h) = text_bg_dimensions(size);
 
@@ -642,46 +676,51 @@ impl GbaEmulator {
         let tile_x = sx / 8;
         let tile_y = sy / 8;
 
-        let entry_addr =
-            text_bg_map_entry_addr(((layer.cnt >> 8) & 0x1F) as u32, size, tile_x, tile_y);
-        let entry = self.bus.scanline_bg_bitmap_vram_read16(line, entry_addr);
-
-        let mut px = sx & 7;
-        let mut py = sy & 7;
-        if (entry & (1 << 10)) != 0 {
-            px = 7 - px;
-        }
-        if (entry & (1 << 11)) != 0 {
-            py = 7 - py;
-        }
-
-        let tile_index = (entry & 0x03FF) as u32;
-        let char_base = ((u32::from(layer.cnt >> 2)) & 0x3) * 0x4000;
-        let color_mode_8bpp = (layer.cnt & (1 << 7)) != 0;
-
-        if color_mode_8bpp {
-            let tile_addr = VRAM_BASE + char_base + tile_index * 64 + py * 8 + px;
-            let index = self.bus.scanline_bg_bitmap_vram_read8(line, tile_addr);
-            if index == 0 {
-                return None;
-            }
-            Some(self.read_bg_palette_color_for_line(line, u16::from(index)))
-        } else {
-            let tile_addr = VRAM_BASE + char_base + tile_index * 32 + py * 4 + (px / 2);
-            let byte = self.bus.scanline_bg_bitmap_vram_read8(line, tile_addr);
-            let index = if (px & 1) == 0 {
-                byte & 0x0F
+        let key = (tile_x, sy);
+        if cache.key != Some(key) {
+            let entry_addr =
+                text_bg_map_entry_addr(((layer.cnt >> 8) & 0x1F) as u32, size, tile_x, tile_y);
+            let entry = self.bus.scanline_bg_bitmap_vram_read16(line, entry_addr);
+            let py = if entry & (1 << 11) != 0 {
+                7 - (sy & 7)
             } else {
-                byte >> 4
+                sy & 7
             };
-            if index == 0 {
-                return None;
+            let tile_index = u32::from(entry & 0x03FF);
+            let char_base = u32::from((layer.cnt >> 2) & 3) * 0x4000;
+            let eight_bit = layer.cnt & (1 << 7) != 0;
+            let row_addr = VRAM_BASE
+                + char_base
+                + tile_index * if eight_bit { 64 } else { 32 }
+                + py * if eight_bit { 8 } else { 4 };
+            for px in 0..8u32 {
+                let source_x = if entry & (1 << 10) != 0 { 7 - px } else { px };
+                let byte = self.bus.scanline_bg_bitmap_vram_read8(
+                    line,
+                    row_addr + if eight_bit { source_x } else { source_x / 2 },
+                );
+                let index = if eight_bit {
+                    byte
+                } else if source_x & 1 == 0 {
+                    byte & 15
+                } else {
+                    byte >> 4
+                };
+                let palette_index = u16::from(index)
+                    + if eight_bit {
+                        0
+                    } else {
+                        ((entry >> 12) & 15) * 16
+                    };
+                cache.colors[px as usize] = if index == 0 {
+                    None
+                } else {
+                    Some(self.read_bg_palette_color_for_line(line, palette_index))
+                };
             }
-
-            let palette_bank = ((entry >> 12) & 0xF) as u16;
-            let palette_index = palette_bank * 16 + u16::from(index);
-            Some(self.read_bg_palette_color_for_line(line, palette_index))
+            cache.key = Some(key);
         }
+        cache.colors[(sx & 7) as usize]
     }
 
     fn sample_affine_bg_color(
@@ -763,10 +802,8 @@ impl GbaEmulator {
         &self,
         y: u32,
         dispcnt: u16,
-        mosaic: MosaicState,
         window_masks: &mut [u8],
-        obj_attrs: &[ObjAttributes; 128],
-        obj_affine: &[ObjAffineParams; 32],
+        objects: Option<&render_objects::ObjScanline>,
     ) {
         let win0_enabled = (dispcnt & (1 << 13)) != 0;
         let win1_enabled = (dispcnt & (1 << 14)) != 0;
@@ -792,9 +829,7 @@ impl GbaEmulator {
 
         for x in 0..GBA_LCD_WIDTH {
             let mut mask = outside_mask;
-            if objwin_enabled
-                && self.sample_objwin_hit(y, dispcnt, x, y, mosaic, obj_attrs, obj_affine)
-            {
+            if objwin_enabled && objects.is_some_and(|line| line.window[x as usize]) {
                 mask = objwin_mask;
             }
             if win1_enabled && point_in_window(x, y, win1_x1, win1_x2, win1_y1, win1_y2) {
@@ -879,6 +914,7 @@ impl GbaEmulator {
             }
         }
 
+        let mut row_caches = [TextBgRowCache::default(); 4];
         for x in 0..GBA_LCD_WIDTH {
             let mut color = backdrop;
             let mut priority = 4u8;
@@ -909,7 +945,13 @@ impl GbaEmulator {
                     y
                 };
                 let sampled = match layer {
-                    BgLayer::Text(l) => self.sample_text_bg_color(y, l, sample_x, sample_y),
+                    BgLayer::Text(l) => self.sample_text_bg_color_cached(
+                        y,
+                        l,
+                        sample_x,
+                        sample_y,
+                        &mut row_caches[i],
+                    ),
                     BgLayer::Affine(l) => self.sample_affine_bg_color(y, l, sample_x, sample_y),
                 };
                 if let Some(layer_color) = sampled {
@@ -1124,9 +1166,7 @@ impl GbaEmulator {
         second_layer_ids: &mut [u8],
         obj_semitrans: &mut [bool],
         window_masks: &[u8],
-        mosaic: MosaicState,
-        obj_attrs: &[ObjAttributes; 128],
-        obj_affine: &[ObjAffineParams; 32],
+        objects: Option<&render_objects::ObjScanline>,
     ) {
         let bldcnt = self.bus.scanline_io_read16(y, 0x50);
         let second_mask = (bldcnt >> 8) & 0x003F;
@@ -1151,7 +1191,7 @@ impl GbaEmulator {
 
             if (dispcnt & (1 << 12)) != 0 && window_allows_layer(window_masks[index], LAYER_OBJ) {
                 let (obj_top, obj_second) =
-                    self.sample_obj_pixels(y, dispcnt, x, y, mosaic, obj_attrs, obj_affine);
+                    objects.map_or((None, None), |line| line.pixels[x as usize]);
                 if let Some(obj_top) = obj_top {
                     let candidate = PixelCandidate {
                         color: bgr555_to_rgb888(obj_top.color),
@@ -1256,332 +1296,6 @@ impl GbaEmulator {
             write_pixel_rgb(pixels, index, new_rgb);
         }
     }
-
-    fn sample_obj_pixels(
-        &self,
-        line: u32,
-        dispcnt: u16,
-        x: u32,
-        y: u32,
-        mosaic: MosaicState,
-        obj_attrs: &[ObjAttributes; 128],
-        obj_affine: &[ObjAffineParams; 32],
-    ) -> (Option<ObjPixel>, Option<ObjPixel>) {
-        let mode = dispcnt & 0x7;
-        let one_d_mapping = (dispcnt & (1 << 6)) != 0;
-        let obj_char_base = if mode >= 3 {
-            OBJ_CHAR_BASE_BITMAP
-        } else {
-            OBJ_CHAR_BASE_TEXT
-        };
-        let obj_mosaic_h = mosaic.obj_h as i32;
-        let obj_mosaic_v = mosaic.obj_v as i32;
-
-        let mut best: Option<ObjPixel> = None;
-        let mut second: Option<ObjPixel> = None;
-        for (obj_index, attrs) in obj_attrs.iter().enumerate() {
-            let attr0 = attrs.attr0;
-            let attr1 = attrs.attr1;
-            let attr2 = attrs.attr2;
-
-            let affine = (attr0 & (1 << 8)) != 0;
-            if !affine && (attr0 & (1 << 9)) != 0 {
-                continue;
-            }
-
-            let obj_mode = ((attr0 >> 10) & 0x3) as u8;
-            if obj_mode == 2 || obj_mode == 3 {
-                continue;
-            }
-            let semi_transparent = obj_mode == 1;
-            let mosaic_enabled = (attr0 & (1 << 12)) != 0;
-
-            let shape = ((attr0 >> 14) & 0x3) as u8;
-            let size = ((attr1 >> 14) & 0x3) as u8;
-            let (width, height) = match obj_dimensions(shape, size) {
-                Some(dim) => dim,
-                None => continue,
-            };
-
-            let x_raw = (attr1 & 0x01FF) as i32;
-            let y_raw = (attr0 & 0x00FF) as i32;
-            let obj_x = if x_raw >= 240 { x_raw - 512 } else { x_raw };
-            let obj_y = if y_raw >= 160 { y_raw - 256 } else { y_raw };
-
-            let color_8bpp = (attr0 & (1 << 13)) != 0;
-            let mut tile_index = (attr2 & 0x03FF) as u32;
-            let tile_span = if color_8bpp { 2 } else { 1 };
-
-            let (sx, sy) = if affine {
-                let double_size = (attr0 & (1 << 9)) != 0;
-                let draw_w = if double_size { width * 2 } else { width } as i32;
-                let draw_h = if double_size { height * 2 } else { height } as i32;
-
-                let mut rel_x = x as i32 - obj_x;
-                let mut rel_y = y as i32 - obj_y;
-                if rel_x < 0 || rel_y < 0 || rel_x >= draw_w || rel_y >= draw_h {
-                    continue;
-                }
-                if mosaic_enabled {
-                    rel_x -= rel_x % obj_mosaic_h;
-                    rel_y -= rel_y % obj_mosaic_v;
-                }
-
-                let dx = rel_x - (draw_w / 2);
-                let dy = rel_y - (draw_h / 2);
-                let affine_index = ((attr1 >> 9) & 0x1F) as usize;
-                let params = &obj_affine[affine_index];
-                let sx_fp = i64::from(params.pa) * i64::from(dx)
-                    + i64::from(params.pb) * i64::from(dy)
-                    + i64::from((width as i32 * 256) / 2);
-                let sy_fp = i64::from(params.pc) * i64::from(dx)
-                    + i64::from(params.pd) * i64::from(dy)
-                    + i64::from((height as i32 * 256) / 2);
-
-                if sx_fp < 0
-                    || sy_fp < 0
-                    || sx_fp >= i64::from(width * 256)
-                    || sy_fp >= i64::from(height * 256)
-                {
-                    continue;
-                }
-
-                ((sx_fp >> 8) as u32, (sy_fp >> 8) as u32)
-            } else {
-                let mut sx = x as i32 - obj_x;
-                let mut sy = y as i32 - obj_y;
-                if sx < 0 || sy < 0 || sx >= width as i32 || sy >= height as i32 {
-                    continue;
-                }
-                if mosaic_enabled {
-                    sx -= sx % obj_mosaic_h;
-                    sy -= sy % obj_mosaic_v;
-                }
-
-                if (attr1 & (1 << 12)) != 0 {
-                    sx = width as i32 - 1 - sx;
-                }
-                if (attr1 & (1 << 13)) != 0 {
-                    sy = height as i32 - 1 - sy;
-                }
-                (sx as u32, sy as u32)
-            };
-
-            if color_8bpp {
-                tile_index &= !1;
-            }
-            let tile_x = sx / 8;
-            let tile_y = sy / 8;
-            let local_x = sx & 7;
-            let local_y = sy & 7;
-
-            let row_step = if one_d_mapping {
-                let tiles_w = (width / 8) as u32;
-                tiles_w * tile_span
-            } else {
-                32
-            };
-
-            let tile_number = tile_index + tile_y * row_step + tile_x * tile_span;
-            let tile_addr = obj_char_base + tile_number * 32;
-
-            let color = if color_8bpp {
-                let index = self
-                    .bus
-                    .scanline_obj_vram_read8(line, tile_addr + local_y * 8 + local_x);
-                if index == 0 {
-                    continue;
-                }
-                self.bus
-                    .scanline_pram_read16(line, 0x200 + u32::from(index) * 2)
-            } else {
-                let byte = self
-                    .bus
-                    .scanline_obj_vram_read8(line, tile_addr + local_y * 4 + (local_x / 2));
-                let index = if (local_x & 1) == 0 {
-                    byte & 0x0F
-                } else {
-                    byte >> 4
-                };
-                if index == 0 {
-                    continue;
-                }
-                let palette_bank = ((attr2 >> 12) & 0x0F) as u16;
-                let palette_index = palette_bank * 16 + u16::from(index);
-                self.bus
-                    .scanline_pram_read16(line, 0x200 + u32::from(palette_index) * 2)
-            };
-
-            let candidate = ObjPixel {
-                obj_index,
-                color,
-                priority: ((attr2 >> 10) & 0x3) as u8,
-                semi_transparent,
-            };
-            if best
-                .as_ref()
-                .is_none_or(|current| obj_pixel_in_front(&candidate, current))
-            {
-                second = best;
-                best = Some(candidate);
-            } else if second
-                .as_ref()
-                .is_none_or(|current| obj_pixel_in_front(&candidate, current))
-            {
-                second = Some(candidate);
-            }
-        }
-
-        (best, second)
-    }
-
-    fn sample_objwin_hit(
-        &self,
-        line: u32,
-        dispcnt: u16,
-        x: u32,
-        y: u32,
-        mosaic: MosaicState,
-        obj_attrs: &[ObjAttributes; 128],
-        obj_affine: &[ObjAffineParams; 32],
-    ) -> bool {
-        let mode = dispcnt & 0x7;
-        let one_d_mapping = (dispcnt & (1 << 6)) != 0;
-        let obj_char_base = if mode >= 3 {
-            OBJ_CHAR_BASE_BITMAP
-        } else {
-            OBJ_CHAR_BASE_TEXT
-        };
-        let obj_mosaic_h = mosaic.obj_h as i32;
-        let obj_mosaic_v = mosaic.obj_v as i32;
-
-        for attrs in obj_attrs {
-            let attr0 = attrs.attr0;
-            let attr1 = attrs.attr1;
-            let attr2 = attrs.attr2;
-
-            let affine = (attr0 & (1 << 8)) != 0;
-            if !affine && (attr0 & (1 << 9)) != 0 {
-                continue;
-            }
-
-            let obj_mode = ((attr0 >> 10) & 0x3) as u8;
-            if obj_mode != 2 {
-                continue;
-            }
-            let mosaic_enabled = (attr0 & (1 << 12)) != 0;
-
-            let shape = ((attr0 >> 14) & 0x3) as u8;
-            let size = ((attr1 >> 14) & 0x3) as u8;
-            let (width, height) = match obj_dimensions(shape, size) {
-                Some(dim) => dim,
-                None => continue,
-            };
-
-            let x_raw = (attr1 & 0x01FF) as i32;
-            let y_raw = (attr0 & 0x00FF) as i32;
-            let obj_x = if x_raw >= 240 { x_raw - 512 } else { x_raw };
-            let obj_y = if y_raw >= 160 { y_raw - 256 } else { y_raw };
-
-            let color_8bpp = (attr0 & (1 << 13)) != 0;
-            let mut tile_index = (attr2 & 0x03FF) as u32;
-            let tile_span = if color_8bpp { 2 } else { 1 };
-
-            let (sx, sy) = if affine {
-                let double_size = (attr0 & (1 << 9)) != 0;
-                let draw_w = if double_size { width * 2 } else { width } as i32;
-                let draw_h = if double_size { height * 2 } else { height } as i32;
-
-                let mut rel_x = x as i32 - obj_x;
-                let mut rel_y = y as i32 - obj_y;
-                if rel_x < 0 || rel_y < 0 || rel_x >= draw_w || rel_y >= draw_h {
-                    continue;
-                }
-                if mosaic_enabled {
-                    rel_x -= rel_x % obj_mosaic_h;
-                    rel_y -= rel_y % obj_mosaic_v;
-                }
-
-                let dx = rel_x - (draw_w / 2);
-                let dy = rel_y - (draw_h / 2);
-                let affine_index = ((attr1 >> 9) & 0x1F) as usize;
-                let params = &obj_affine[affine_index];
-                let sx_fp = i64::from(params.pa) * i64::from(dx)
-                    + i64::from(params.pb) * i64::from(dy)
-                    + i64::from((width as i32 * 256) / 2);
-                let sy_fp = i64::from(params.pc) * i64::from(dx)
-                    + i64::from(params.pd) * i64::from(dy)
-                    + i64::from((height as i32 * 256) / 2);
-
-                if sx_fp < 0
-                    || sy_fp < 0
-                    || sx_fp >= i64::from(width * 256)
-                    || sy_fp >= i64::from(height * 256)
-                {
-                    continue;
-                }
-
-                ((sx_fp >> 8) as u32, (sy_fp >> 8) as u32)
-            } else {
-                let mut sx = x as i32 - obj_x;
-                let mut sy = y as i32 - obj_y;
-                if sx < 0 || sy < 0 || sx >= width as i32 || sy >= height as i32 {
-                    continue;
-                }
-                if mosaic_enabled {
-                    sx -= sx % obj_mosaic_h;
-                    sy -= sy % obj_mosaic_v;
-                }
-
-                if (attr1 & (1 << 12)) != 0 {
-                    sx = width as i32 - 1 - sx;
-                }
-                if (attr1 & (1 << 13)) != 0 {
-                    sy = height as i32 - 1 - sy;
-                }
-                (sx as u32, sy as u32)
-            };
-
-            if color_8bpp {
-                tile_index &= !1;
-            }
-            let tile_x = sx / 8;
-            let tile_y = sy / 8;
-            let local_x = sx & 7;
-            let local_y = sy & 7;
-
-            let row_step = if one_d_mapping {
-                let tiles_w = (width / 8) as u32;
-                tiles_w * tile_span
-            } else {
-                32
-            };
-
-            let tile_number = tile_index + tile_y * row_step + tile_x * tile_span;
-            let tile_addr = obj_char_base + tile_number * 32;
-            let pixel_nonzero = if color_8bpp {
-                self.bus
-                    .scanline_obj_vram_read8(line, tile_addr + local_y * 8 + local_x)
-                    != 0
-            } else {
-                let byte = self
-                    .bus
-                    .scanline_obj_vram_read8(line, tile_addr + local_y * 4 + (local_x / 2));
-                let index = if (local_x & 1) == 0 {
-                    byte & 0x0F
-                } else {
-                    byte >> 4
-                };
-                index != 0
-            };
-
-            if pixel_nonzero {
-                return true;
-            }
-        }
-
-        false
-    }
 }
 
 impl EmulatorCore for GbaEmulator {
@@ -1591,6 +1305,7 @@ impl EmulatorCore for GbaEmulator {
 
     fn load_rom(&mut self, rom: RomImage) -> EmuResult<()> {
         self.bus.load_rom(rom.bytes());
+        self.rom_crc.take();
         self.rom_loaded = true;
         self.reset();
         Ok(())
@@ -1618,8 +1333,7 @@ impl EmulatorCore for GbaEmulator {
         let mut pending_snapshot_line: Option<u32> = None;
         let mut cycles_this_frame = 0;
         while cycles_this_frame < GBA_FRAME_CYCLES {
-            let step_cycles = self.cpu.step(&mut self.bus);
-            self.timer.step(step_cycles, &mut self.bus);
+            let step_cycles = self.step_cpu_and_timers(GBA_FRAME_CYCLES - cycles_this_frame);
             let result = self.ppu.step(step_cycles, &mut self.bus);
             cycles_this_frame += step_cycles;
 
@@ -1733,8 +1447,7 @@ impl GbaEmulator {
 
         let mut cycles_this_frame = 0;
         while cycles_this_frame < GBA_FRAME_CYCLES {
-            let step_cycles = self.cpu.step(&mut self.bus);
-            self.timer.step(step_cycles, &mut self.bus);
+            let step_cycles = self.step_cpu_and_timers(GBA_FRAME_CYCLES - cycles_this_frame);
             let result = self.ppu.step(step_cycles, &mut self.bus);
             cycles_this_frame += step_cycles;
 

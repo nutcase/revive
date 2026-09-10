@@ -298,6 +298,7 @@ struct YmChannel {
     ams: u8,
     fms: u8,
     operators: [YmOperator; 4],
+    phase_cache: ym2612::PhaseCache,
 }
 
 #[derive(Debug, Clone, bincode::Encode, bincode::Decode)]

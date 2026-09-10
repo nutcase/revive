@@ -223,6 +223,15 @@ impl Arm7Tdmi {
         self.thumb_bl_upper_und = None;
     }
 
+    pub(crate) fn waiting_for_interrupt(&self, bus: &GbaBus) -> bool {
+        let mask = if self.halt_irq_mask == 0 {
+            u16::MAX
+        } else {
+            self.halt_irq_mask
+        };
+        self.halted && bus.pending_interrupts() & mask == 0
+    }
+
     pub fn step(&mut self, bus: &mut GbaBus) -> u32 {
         let trace_hooks = trace_step_hooks();
         let mut woke_from_halt = false;

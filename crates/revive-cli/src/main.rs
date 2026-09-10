@@ -11,6 +11,7 @@ mod hud;
 mod input;
 mod perf;
 mod render;
+mod repaint;
 mod session;
 mod state;
 mod wgpu_game;
@@ -206,6 +207,9 @@ fn run_sdl_loop(
     bring_window_to_front(&mut window);
     let mut egui_input = EguiInput::new(&window);
     let egui_ctx = egui_input.context();
+    let repaint = repaint::RepaintSchedule::default();
+    let repaint_callback = repaint.clone();
+    egui_ctx.set_request_repaint_callback(move |info| repaint_callback.request_after(info.delay));
     let text_input = video.text_input();
     let mut text_input_active = false;
     text_input.stop(&window);
@@ -236,6 +240,8 @@ fn run_sdl_loop(
     let mut core_changed = true;
     let mut was_paused = false;
     let mut profiler = FrameProfiler::from_env();
+    let mut pending_event = None;
+    let mut redraw_requested = true;
 
     'running: loop {
         let should_enable_text_input = cheat_panel.is_visible();
@@ -251,6 +257,8 @@ fn run_sdl_loop(
         if matches!(
             process_sdl_events(
                 &mut event_pump,
+                &mut pending_event,
+                &mut redraw_requested,
                 &video,
                 &mut egui_input,
                 &egui_ctx,
@@ -303,66 +311,75 @@ fn run_sdl_loop(
         profiler.end(Stage::Audio, audio_started);
         let upload_started = profiler.start();
 
-        if core_changed {
+        let minimized = window.is_minimized();
+        redraw_requested |= core_changed;
+        if core_changed && !minimized {
             render_state.upload_core_frame(&mut core, &mut window, cheat_panel.is_visible());
             cheat_panel.invalidate_memory();
             core_changed = false;
         }
 
         profiler.end(Stage::Upload, upload_started);
-        let draw_ui = cheat_panel.is_visible() || hud_toast.is_visible();
-        if draw_ui {
-            let ui_started = profiler.start();
-            let ctx = egui_input.begin_frame(&window);
-            let mut pending_writes = Vec::new();
-            if cheat_panel.is_visible() {
-                #[allow(deprecated)]
-                let panel_resp = egui::SidePanel::right("cheat_panel")
-                    .resizable(true)
-                    .min_width(PANEL_WIDTH_MIN)
-                    .default_width(PANEL_WIDTH_DEFAULT)
-                    .show(&ctx, |ui| {
-                        egui::ScrollArea::vertical()
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                pending_writes = cheat_panel.show_panel(
-                                    ui,
-                                    &core,
-                                    &mut cheats,
-                                    Some(cheat_path),
-                                );
-                            });
-                    });
-                let actual_w = (panel_resp.response.rect.width() * ctx.pixels_per_point()) as u32;
-                if actual_w != render_state.panel_width_px() {
-                    render_state.set_panel_width_px(actual_w);
-                    render_state.resize_window_for_panel(&mut window, true);
+        let presented = !minimized && (!paused || redraw_requested || repaint.due());
+        if presented {
+            redraw_requested = false;
+            repaint.begin_frame();
+            let draw_ui = cheat_panel.is_visible() || hud_toast.is_visible();
+            if draw_ui {
+                let ui_started = profiler.start();
+                let ctx = egui_input.begin_frame(&window);
+                let mut pending_writes = Vec::new();
+                if cheat_panel.is_visible() {
+                    #[allow(deprecated)]
+                    let panel_resp = egui::SidePanel::right("cheat_panel")
+                        .resizable(true)
+                        .min_width(PANEL_WIDTH_MIN)
+                        .default_width(PANEL_WIDTH_DEFAULT)
+                        .show(&ctx, |ui| {
+                            egui::ScrollArea::vertical()
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    pending_writes = cheat_panel.show_panel(
+                                        ui,
+                                        &core,
+                                        &mut cheats,
+                                        Some(cheat_path),
+                                    );
+                                });
+                        });
+                    let actual_w =
+                        (panel_resp.response.rect.width() * ctx.pixels_per_point()) as u32;
+                    if actual_w != render_state.panel_width_px() {
+                        render_state.set_panel_width_px(actual_w);
+                        render_state.resize_window_for_panel(&mut window, true);
+                    }
                 }
-            }
-            hud_toast.draw(&ctx);
+                hud_toast.draw(&ctx);
 
-            let full_output = egui_input.end_frame(&mut video);
-            let primitives = egui_input.tessellate(&full_output);
-            profiler.end(Stage::Ui, ui_started);
-            let present_started = profiler.start();
-            render_state.present_frame(
-                &window,
-                cheat_panel.is_visible(),
-                Some(UiRenderData {
-                    textures_delta: &full_output.textures_delta,
-                    primitives: &primitives,
-                    pixels_per_point: ctx.pixels_per_point(),
-                }),
-            )?;
+                let full_output = egui_input.end_frame(&mut video);
+                let primitives = egui_input.tessellate(&full_output);
+                profiler.end(Stage::Ui, ui_started);
+                let present_started = profiler.start();
+                render_state.present_frame(
+                    &window,
+                    cheat_panel.is_visible(),
+                    Some(UiRenderData {
+                        textures_delta: &full_output.textures_delta,
+                        primitives: &primitives,
+                        pixels_per_point: ctx.pixels_per_point(),
+                    }),
+                )?;
 
-            profiler.end(Stage::Present, present_started);
-            for write in pending_writes {
-                core_changed |= core.write_memory_byte(&write.region, write.offset, write.value);
+                profiler.end(Stage::Present, present_started);
+                for write in pending_writes {
+                    core_changed |=
+                        core.write_memory_byte(&write.region, write.offset, write.value);
+                }
+            } else {
+                let present_started = profiler.start();
+                render_state.present_frame(&window, false, None)?;
+                profiler.end(Stage::Present, present_started);
             }
-        } else {
-            let present_started = profiler.start();
-            render_state.present_frame(&window, false, None)?;
-            profiler.end(Stage::Present, present_started);
         }
 
         if front_retry_frames > 0 {
@@ -370,7 +387,23 @@ fn run_sdl_loop(
             front_retry_frames -= 1;
         }
         let wait_started = profiler.start();
-        frame_clock.wait();
+        if cheat_panel.is_paused() {
+            // Immediate egui animation requests must not turn pause into a
+            // busy loop. Pace actual redraws at the native frame rate.
+            if presented {
+                frame_clock.wait();
+            }
+            // Preserve the waking event for the next iteration; never consume
+            // and discard the first key, click, expose or quit event.
+            let timeout = if (core_changed || redraw_requested) && !minimized {
+                std::time::Duration::ZERO
+            } else {
+                repaint.wait_timeout(minimized)
+            };
+            pending_event = event_pump.wait_event_timeout(timeout);
+        } else {
+            frame_clock.wait();
+        }
         profiler.end(Stage::Wait, wait_started);
         profiler.finish_frame();
     }

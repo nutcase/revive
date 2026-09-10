@@ -15,6 +15,8 @@ pub(crate) enum EventLoopAction {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn process_sdl_events(
     event_pump: &mut sdl3::EventPump,
+    pending_event: &mut Option<Event>,
+    redraw_requested: &mut bool,
     video: &sdl3::VideoSubsystem,
     egui_input: &mut EguiInput,
     egui_ctx: &egui::Context,
@@ -25,7 +27,12 @@ pub(crate) fn process_sdl_events(
     input_debug: bool,
     core_changed: &mut bool,
 ) -> EventLoopAction {
-    for event in event_pump.poll_iter() {
+    for event in pending_event
+        .take()
+        .into_iter()
+        .chain(event_pump.poll_iter())
+    {
+        *redraw_requested = true;
         if cheat_panel.is_visible() {
             egui_input.handle_event(&event, video);
         }

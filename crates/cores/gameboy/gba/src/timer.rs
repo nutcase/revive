@@ -42,6 +42,40 @@ impl GbaTimer {
         Ok(())
     }
 
+    pub(crate) fn cycles_until_event(&self, bus: &GbaBus) -> u32 {
+        let mut next = u32::MAX;
+        for channel in 0..TIMER_COUNT {
+            let control = bus.timer_control(channel);
+            if control & TIMER_CTRL_ENABLE == 0 {
+                continue;
+            }
+            // First synchronize an enabled timer with its reload value.
+            if !self.enabled[channel] {
+                return 1;
+            }
+            if control & TIMER_CTRL_CASCADE != 0 {
+                continue;
+            }
+            let prescaler = PRESCALERS[(control & 3) as usize];
+            if self.accumulators[channel] >= prescaler {
+                return 1;
+            }
+            let cycles = (0x1_0000 - u32::from(bus.timer_counter(channel))) * prescaler
+                - self.accumulators[channel];
+            next = next.min(cycles.max(1));
+        }
+        next
+    }
+
+    /// HALT previously called step(1). Keep that exact timer/FIFO/mixer
+    /// ordering, including when an experimental audio granularity is set.
+    pub(crate) fn step_halted(&mut self, cycles: u32, bus: &mut GbaBus) {
+        for _ in 0..cycles {
+            self.step_timers_for_cycles(1, bus);
+            bus.mix_audio_for_cycles(1);
+        }
+    }
+
     pub fn step(&mut self, cycles: u32, bus: &mut GbaBus) {
         let granularity = audio_timer_granularity();
         let mut remaining = cycles;

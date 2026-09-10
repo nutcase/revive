@@ -69,3 +69,88 @@ REVIVE_PERF=1 cargo run-native -- <rom>
 Presentation timing includes surface acquisition/VSync waits, not GPU execution
 time. Frame pacing is measured separately. Avoid overlapping builds/tests when
 collecting measurements or running workspace doc tests.
+
+## Follow-up optimizations (2026-09-10)
+
+Implemented on top of `d254fab`:
+
+- **GBA OBJ:** rasterize each object's visible horizontal span once per scanline,
+  decoding OAM metadata outside the pixel loop. Keep the best two OBJ pixels for
+  blending and a separate object-window mask. Disabled OBJ/window rendering does
+  not allocate or clear a scanline buffer. Affine/double-size bounds, wrapping,
+  mosaic, palette modes and OAM ordering retain the existing behavior.
+- **GBA text BG:** cache one decoded eight-pixel tile row per text layer per
+  scanline. Wrapped tile coordinates and source row identify the cache entry;
+  scanline-local caches cannot carry stale VRAM/palette/register data across lines.
+- **GBA HALT:** skip CPU dispatch and repeated PPU polling up to the nearest
+  HBlank/scanline boundary or timer overflow. All overflows are boundaries,
+  including those with IRQ disabled, because they can drive cascade/FIFO DMA.
+  Newly enabled or reconfigured timers synchronize before batching. Timer and
+  audio mixing still run in their original one-cycle order during HALT, even
+  with an experimental audio granularity configured. Both frame-stepping paths
+  use the same scheduler.
+- **YM2612:** cache phase increments/keycodes using their complete input values,
+  and share PM calculation for operators with the same FNUM. FMS, LFO step/sign,
+  channel-3 special frequencies, MUL and detune participate in the key. The
+  derived cache encodes zero bytes and starts cold after decoding, preserving
+  the existing save-state layout. Waveforms, sample rate and envelope processing
+  are unchanged.
+- **GBA states:** count serialized bytes without allocating a payload on load;
+  write header and payload into one exactly sized buffer on save. ROM CRC is
+  cached lazily and invalidated when replacing the ROM. Existing and legacy
+  payload layouts remain supported.
+- **Paused/minimized frontend:** skip unchanged egui generation and GPU
+  presentation. SDL input wakes the paused event wait, with the waking event
+  retained for processing. egui repaint deadlines handle tooltips, caret and
+  animation; HUD expiry requests its own repaint. Actual redraws retain native
+  frame pacing so immediate animation requests cannot busy-loop. Minimized
+  windows skip frame uploads and presentation; active emulation/audio continue.
+
+### Follow-up measurements
+
+Three sequential release runs, after compilation and with the test app closed;
+median times below. Tests run with one test thread. Reference and optimized
+paths are compiled into the same test binary: the old pixel renderers, original
+FM phase calculation, one-cycle HALT dispatch, and allocating state-size check
+serve as references. These are synthetic workload measurements, not overall
+application FPS or guarantees for commercial ROMs.
+
+| Workload | Reference | Optimized | Reduction |
+| --- | ---: | ---: | ---: |
+| OBJ + object-window rasterization, 160 lines | 12.5472 ms | 0.3173 ms | 97.5% |
+| One text BG layer, 160 lines | 0.4396 ms | 0.3027 ms | 31.1% |
+| HALT/interrupt loop, one frame including audio | 4.8315 ms | 2.1824 ms | 54.8% |
+| State payload size calculation only | 2.3797 ms | 0.0024 ms | 99.9% |
+| Six active FM channels, 532,670 hardware samples | 104.076 ms | 82.269 ms | 21.0% |
+
+OBJ/BG pixel checksums and FM PCM checksums matched in every run. HALT state
+CRC was `EAF351` on both paths. The state-size result measures the eliminated
+size-check allocation, not full save/load latency. Cache benefits depend on
+scene content and register-write frequency.
+
+### Follow-up validation
+
+- Workspace tests: **1,667 passed, 13 ignored**, including doc tests.
+- Pixel-reference comparisons cover OBJ priority, semi-transparency, affine
+  matrices/double size, disabled objects, object windows, wrapped coordinates,
+  mosaic, 4/8-bit pixels, text BG scroll and all map sizes. Existing scanline
+  snapshot/DMA regression tests remain passing.
+- HALT comparisons cover both frame paths, all timer prescalers, cascade, FIFO
+  DMA and display interrupts; frame cycles, pixels, PCM and serialized state
+  match the one-cycle reference.
+- FM comparisons cover 8,192 frequency/operator configurations and 16,384 PCM
+  samples with register writes, special-mode changes and state restoration.
+- State tests compare the original byte layout, legacy loading and ROM CRC
+  invalidation after replacing a ROM.
+- Release build and targeted clippy completed; existing unrelated warnings
+  remain. Formatting and whitespace checks pass.
+- Release app on Metal: pause, save, memory edit `00 -> 2A`, load restoring `00`,
+  HUD expiry without input, minimize/restore, resume and clean exit checked.
+  A settled paused 300-iteration profiler window reported UI and presentation
+  mean/p95 `0.0000/0.0000 ms`; resumed core/UI/presentation work was observed.
+
+```sh
+cargo test --release -p emulator-gba benchmark_followup_render_halt_and_state -- --ignored --nocapture --test-threads=1
+cargo test --release -p megadrive-core benchmark_fm_phase_cache -- --ignored --nocapture --test-threads=1
+cargo test --workspace
+```
