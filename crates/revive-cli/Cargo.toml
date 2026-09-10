@@ -14,10 +14,13 @@ gba-runtime-debug-trace = ["revive-core/gba-runtime-debug-trace"]
 [dependencies]
 revive-core = { path = "../revive-core" }
 revive-cheat = { path = "../revive-cheat" }
-egui = "0.31"
-egui_sdl2_gl = "0.31"
+bytemuck = { version = "1.24", features = ["derive"] }
+egui = "0.34"
+egui-wgpu = "0.34"
+pollster = "0.4"
 rfd = "0.15"
-sdl2 = { version = "0.37", features = ["bundled", "static-link"] }
+sdl3 = { version = "0.18", features = ["build-from-source-static", "raw-window-handle"] }
+wgpu = { version = "29", default-features = true }
 
 [[bin]]
 name = "revive"

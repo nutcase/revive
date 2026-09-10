@@ -97,6 +97,10 @@ impl Emulator {
         self.memory.drain_audio_samples(max_samples)
     }
 
+    pub fn drain_audio_samples_into(&mut self, max_samples: usize, out: &mut Vec<i16>) {
+        self.memory.drain_audio_samples_into(max_samples, out);
+    }
+
     pub fn set_audio_output_sample_rate_hz(&mut self, hz: u32) {
         self.memory.set_audio_output_sample_rate_hz(hz);
     }

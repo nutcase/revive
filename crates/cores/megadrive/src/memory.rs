@@ -197,6 +197,10 @@ impl MemoryMap {
         self.audio.drain_samples(max_samples)
     }
 
+    pub fn drain_audio_samples_into(&mut self, max_samples: usize, out: &mut Vec<i16>) {
+        self.audio.drain_samples_into(max_samples, out);
+    }
+
     pub fn set_button_pressed(&mut self, button: Button, pressed: bool) {
         self.io.set_button_pressed(button, pressed);
     }

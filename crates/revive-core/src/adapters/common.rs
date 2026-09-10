@@ -26,10 +26,6 @@ pub(crate) fn fixed_audio_spec(sample_rate_hz: u32, channels: u8) -> AudioSpec {
     }
 }
 
-pub(crate) fn replace_audio_buffer(out: &mut Vec<i16>, samples: Vec<i16>) {
-    *out = samples;
-}
-
 pub(crate) fn save_state_slot(
     system: SystemKind,
     rom_path: &Path,

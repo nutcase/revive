@@ -3,9 +3,7 @@ use std::path::{Path, PathBuf};
 use mastersystem_core::{Button as SmsButton, Emulator as SmsEmulator};
 use sg1000_core::{Button as SgButton, Emulator as SgEmulator};
 
-use super::common::{
-    fixed_audio_spec, load_state_slot, replace_audio_buffer, save_state_slot, write_byte,
-};
+use super::common::{fixed_audio_spec, load_state_slot, save_state_slot, write_byte};
 use crate::paths::rom_stem;
 use crate::system::{
     AudioSpec, FrameView, MemoryRegion, PixelFormat, Result, SystemKind, VirtualButton,
@@ -23,7 +21,7 @@ trait Sega8Emulator: Sized {
     fn frame_buffer(&self) -> &[u8];
     fn audio_output_channels(&self) -> u8;
     fn set_audio_output_sample_rate_hz(&mut self, hz: u32);
-    fn drain_audio_samples(&mut self, max_samples: usize) -> Vec<i16>;
+    fn drain_audio_samples_into(&mut self, max_samples: usize, out: &mut Vec<i16>);
     fn save_state_to_file(&self, path: &Path) -> Result<()>;
     fn load_state_from_file(&mut self, path: &Path) -> Result<()>;
 }
@@ -68,8 +66,8 @@ impl Sega8Emulator for SgEmulator {
         SgEmulator::set_audio_output_sample_rate_hz(self, hz);
     }
 
-    fn drain_audio_samples(&mut self, max_samples: usize) -> Vec<i16> {
-        SgEmulator::drain_audio_samples(self, max_samples)
+    fn drain_audio_samples_into(&mut self, max_samples: usize, out: &mut Vec<i16>) {
+        SgEmulator::drain_audio_samples_into(self, max_samples, out);
     }
 
     fn save_state_to_file(&self, path: &Path) -> Result<()> {
@@ -114,8 +112,8 @@ impl Sega8Emulator for SmsEmulator {
         SmsEmulator::set_audio_output_sample_rate_hz(self, hz);
     }
 
-    fn drain_audio_samples(&mut self, max_samples: usize) -> Vec<i16> {
-        SmsEmulator::drain_audio_samples(self, max_samples)
+    fn drain_audio_samples_into(&mut self, max_samples: usize, out: &mut Vec<i16>) {
+        SmsEmulator::drain_audio_samples_into(self, max_samples, out);
     }
 
     fn save_state_to_file(&self, path: &Path) -> Result<()> {
@@ -279,7 +277,7 @@ impl<E: Sega8Emulator> Sega8Adapter<E> {
 
     fn drain_audio_i16(&mut self, out: &mut Vec<i16>) {
         let max_samples = ((self.audio_sample_rate_hz as usize) / 20).max(1024) * 2;
-        replace_audio_buffer(out, self.emulator.drain_audio_samples(max_samples));
+        self.emulator.drain_audio_samples_into(max_samples, out);
     }
 
     fn save_state_to_slot(&mut self, slot: u8) -> Result<()> {

@@ -15,26 +15,29 @@ pub struct MemorySnapshot {
 
 #[derive(Debug, Clone)]
 struct MemorySegment {
-    id: String,
-    label: String,
+    id: &'static str,
+    label: &'static str,
     start: usize,
     len: usize,
     writable: bool,
 }
 
 impl MemorySnapshot {
-    pub fn capture(core: &CoreInstance) -> Self {
-        let mut segments = Vec::new();
-        let mut data = Vec::new();
-        for region in core.memory_regions() {
+    pub fn capture_into(&mut self, core: &CoreInstance) {
+        self.segments.clear();
+        self.data.clear();
+        let regions = core.memory_regions();
+        self.data
+            .reserve(regions.iter().map(|region| region.len).sum());
+        for region in regions {
             let Some(bytes) = core.read_memory(region.id) else {
                 continue;
             };
-            let start = data.len();
-            data.extend_from_slice(bytes);
-            segments.push(segment_from_region(region, start, bytes.len()));
+            let start = self.data.len();
+            self.data.extend_from_slice(bytes);
+            self.segments
+                .push(segment_from_region(region, start, bytes.len()));
         }
-        Self { segments, data }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -63,7 +66,7 @@ impl MemorySnapshot {
     ) -> Option<MemoryWrite> {
         let (segment, local) = self.segment_for_combined_offset(offset)?;
         segment.writable.then(|| MemoryWrite {
-            region: segment.id.clone(),
+            region: segment.id.to_string(),
             offset: local,
             value,
         })
@@ -126,8 +129,8 @@ impl MemorySnapshot {
 
 fn segment_from_region(region: MemoryRegion, start: usize, len: usize) -> MemorySegment {
     MemorySegment {
-        id: region.id.to_string(),
-        label: region.label.to_string(),
+        id: region.id,
+        label: region.label,
         start,
         len,
         writable: region.writable,

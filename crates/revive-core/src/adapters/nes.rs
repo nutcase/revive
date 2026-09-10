@@ -12,6 +12,7 @@ pub struct NesAdapter {
     title: String,
     controllers: [u8; 2],
     audio_sample_rate_hz: u32,
+    audio_scratch: Vec<f32>,
 }
 
 impl NesAdapter {
@@ -27,6 +28,7 @@ impl NesAdapter {
             title: rom_stem(path),
             controllers: [0, 0],
             audio_sample_rate_hz: 44_100,
+            audio_scratch: Vec::new(),
         })
     }
 
@@ -66,7 +68,9 @@ impl NesAdapter {
 
     pub fn drain_audio_i16(&mut self, out: &mut Vec<i16>) {
         out.clear();
-        for sample in self.nes.get_audio_buffer() {
+        self.nes.get_audio_buffer_into(&mut self.audio_scratch);
+        out.reserve(self.audio_scratch.len() * 2);
+        for sample in self.audio_scratch.drain(..) {
             let value = f32_to_i16(sample);
             out.push(value);
             out.push(value);

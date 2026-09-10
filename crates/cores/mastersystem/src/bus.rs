@@ -132,6 +132,10 @@ impl Bus {
         <Self as Sega8BusDevices>::drain_audio_samples(self, max_samples)
     }
 
+    pub fn drain_audio_samples_into(&mut self, max_samples: usize, out: &mut Vec<i16>) {
+        <Self as Sega8BusDevices>::drain_audio_samples_into(self, max_samples, out);
+    }
+
     pub fn set_audio_output_sample_rate_hz(&mut self, hz: u32) {
         <Self as Sega8BusDevices>::set_audio_output_sample_rate_hz(self, hz);
     }

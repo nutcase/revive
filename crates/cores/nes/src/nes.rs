@@ -146,6 +146,10 @@ impl Nes {
     }
 
     /// Drain generated audio samples from the fallback Vec buffer.
+    pub fn get_audio_buffer_into(&mut self, out: &mut Vec<f32>) {
+        self.bus.get_audio_buffer_into(out);
+    }
+
     pub fn get_audio_buffer(&mut self) -> Vec<f32> {
         self.bus.get_audio_buffer()
     }

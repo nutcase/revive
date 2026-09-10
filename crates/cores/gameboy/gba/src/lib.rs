@@ -1,8 +1,11 @@
 mod bus;
 mod cpu;
+#[cfg(test)]
+mod performance_tests;
 mod ppu;
 pub mod state;
 mod timer;
+mod vram_snapshots;
 
 use bus::GbaBus;
 use cpu::Arm7Tdmi;

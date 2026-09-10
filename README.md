@@ -147,6 +147,32 @@ cargo run-apple -p revive-cli --features megadrive-runtime-debug-flags -- <rom>
 cargo run-apple -p revive-cli --features gba-runtime-debug-trace -- <rom>
 ```
 
+## Performance measurements
+
+Set `REVIVE_PERF=1` to log mean/p95 CPU wall time every 300 frames:
+
+```sh
+REVIVE_PERF=1 cargo run-native -- <rom>
+cargo test --release -p emulator-gba benchmark_gba_frames_and_snapshots -- --ignored --nocapture
+cargo test -p revive-cli gpu_upload_preserves_rgb_rgba_bgra_colors_and_format_changes -- --ignored
+```
+
+The frontend separates core/cheats, audio, frame upload, UI, presentation and
+frame pacing. Presentation includes surface/VSync waits; it does not measure GPU
+execution time. Compare the same ROM/scene, audio settings and panel state in
+release builds, without another build running in the background. The ignored
+GBA benchmark uses a synthetic Mode 3 ROM and includes both unchanged VRAM and
+VRAM writes on every scanline; it is not a commercial-game performance estimate.
+
+GBA scanlines share immutable VRAM snapshots until the corresponding memory
+changes. CPU/DMA writes, mirrored writes, external mutable memory access, reset
+and state load invalidate that cache. Save states retain the original expanded
+snapshot layout and historical scanline contents. SNES/PCE BGRA frames upload
+directly to BGRA textures; NES/MD/SG-1000/SMS reuse audio output buffers. The
+cheat panel captures only its active tab and swaps reusable current/previous
+buffers. Pausing skips core/audio work and unchanged frame uploads; state keys,
+memory edits and cheats invalidate the cached frame and memory view.
+
 ## ROM Detection
 
 Revive detects systems from file extensions.

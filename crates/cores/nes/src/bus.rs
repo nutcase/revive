@@ -86,6 +86,10 @@ impl Bus {
         self.apu.set_audio_ring(ring);
     }
 
+    pub fn get_audio_buffer_into(&mut self, out: &mut Vec<f32>) {
+        self.apu.get_audio_buffer_into(out);
+    }
+
     pub fn get_audio_buffer(&mut self) -> Vec<f32> {
         self.apu.get_audio_buffer()
     }

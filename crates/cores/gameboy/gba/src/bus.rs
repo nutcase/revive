@@ -1,3 +1,4 @@
+use crate::vram_snapshots::VramSnapshots;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::sync::OnceLock;
@@ -653,9 +654,9 @@ pub struct GbaBus {
     scanline_io_valid: Box<[bool; GBA_VISIBLE_LINES]>,
     scanline_pram: Box<[[u8; PRAM_SIZE]; GBA_VISIBLE_LINES]>,
     scanline_pram_valid: Box<[bool; GBA_VISIBLE_LINES]>,
-    scanline_bg_bitmap_vram: Vec<u8>,
+    scanline_bg_bitmap_vram: VramSnapshots,
     scanline_bg_bitmap_vram_valid: Box<[bool; GBA_VISIBLE_LINES]>,
-    scanline_obj_vram: Vec<u8>,
+    scanline_obj_vram: VramSnapshots,
     scanline_obj_vram_valid: Box<[bool; GBA_VISIBLE_LINES]>,
     scanline_oam: Box<[[u8; OAM_SIZE]; GBA_VISIBLE_LINES]>,
     scanline_oam_valid: Box<[bool; GBA_VISIBLE_LINES]>,
@@ -752,9 +753,12 @@ impl Default for GbaBus {
             scanline_io_valid: Box::new([false; GBA_VISIBLE_LINES]),
             scanline_pram: Box::new([[0u8; PRAM_SIZE]; GBA_VISIBLE_LINES]),
             scanline_pram_valid: Box::new([false; GBA_VISIBLE_LINES]),
-            scanline_bg_bitmap_vram: vec![0; BG_BITMAP_VRAM_SNAPSHOT_SIZE * GBA_VISIBLE_LINES],
+            scanline_bg_bitmap_vram: VramSnapshots::new(
+                BG_BITMAP_VRAM_SNAPSHOT_SIZE,
+                GBA_VISIBLE_LINES,
+            ),
             scanline_bg_bitmap_vram_valid: Box::new([false; GBA_VISIBLE_LINES]),
-            scanline_obj_vram: vec![0; OBJ_VRAM_SNAPSHOT_SIZE * GBA_VISIBLE_LINES],
+            scanline_obj_vram: VramSnapshots::new(OBJ_VRAM_SNAPSHOT_SIZE, GBA_VISIBLE_LINES),
             scanline_obj_vram_valid: Box::new([false; GBA_VISIBLE_LINES]),
             scanline_oam: Box::new([[0u8; OAM_SIZE]; GBA_VISIBLE_LINES]),
             scanline_oam_valid: Box::new([false; GBA_VISIBLE_LINES]),
@@ -997,19 +1001,11 @@ impl GbaBus {
         for &valid in self.scanline_pram_valid.iter() {
             w.write_bool(valid);
         }
-        for line in 0..GBA_VISIBLE_LINES {
-            let start = line * BG_BITMAP_VRAM_SNAPSHOT_SIZE;
-            let end = start + BG_BITMAP_VRAM_SNAPSHOT_SIZE;
-            w.write_slice(&self.scanline_bg_bitmap_vram[start..end]);
-        }
+        self.scanline_bg_bitmap_vram.serialize(w);
         for &valid in self.scanline_bg_bitmap_vram_valid.iter() {
             w.write_bool(valid);
         }
-        for line in 0..GBA_VISIBLE_LINES {
-            let start = line * OBJ_VRAM_SNAPSHOT_SIZE;
-            let end = start + OBJ_VRAM_SNAPSHOT_SIZE;
-            w.write_slice(&self.scanline_obj_vram[start..end]);
-        }
+        self.scanline_obj_vram.serialize(w);
         for &valid in self.scanline_obj_vram_valid.iter() {
             w.write_bool(valid);
         }
@@ -1080,6 +1076,7 @@ impl GbaBus {
         r.read_into_slice(&mut self.io)?;
         r.read_into_slice(&mut self.wave_ram)?;
         r.read_into_slice(&mut self.pram)?;
+        self.invalidate_vram_snapshots();
         r.read_into_slice(&mut self.vram)?;
         r.read_into_slice(&mut self.oam)?;
         r.read_into_slice(&mut self.sram)?;
@@ -1198,19 +1195,11 @@ impl GbaBus {
         for valid in self.scanline_pram_valid.iter_mut() {
             *valid = r.read_bool()?;
         }
-        for line in 0..GBA_VISIBLE_LINES {
-            let start = line * BG_BITMAP_VRAM_SNAPSHOT_SIZE;
-            let end = start + BG_BITMAP_VRAM_SNAPSHOT_SIZE;
-            r.read_into_slice(&mut self.scanline_bg_bitmap_vram[start..end])?;
-        }
+        self.scanline_bg_bitmap_vram.deserialize(r)?;
         for valid in self.scanline_bg_bitmap_vram_valid.iter_mut() {
             *valid = r.read_bool()?;
         }
-        for line in 0..GBA_VISIBLE_LINES {
-            let start = line * OBJ_VRAM_SNAPSHOT_SIZE;
-            let end = start + OBJ_VRAM_SNAPSHOT_SIZE;
-            r.read_into_slice(&mut self.scanline_obj_vram[start..end])?;
-        }
+        self.scanline_obj_vram.deserialize(r)?;
         for valid in self.scanline_obj_vram_valid.iter_mut() {
             *valid = r.read_bool()?;
         }
@@ -1313,13 +1302,27 @@ impl GbaBus {
         }
     }
 
+    fn invalidate_vram_snapshots(&mut self) {
+        self.scanline_bg_bitmap_vram.invalidate();
+        self.scanline_obj_vram.invalidate();
+    }
+
+    // All CPU/DMA VRAM writes pass through aligned halfword writes, including
+    // byte duplication and mirrored addresses. The BG and OBJ ranges overlap.
+    fn invalidate_vram_snapshot_range(&mut self, offset: usize) {
+        if offset < BG_BITMAP_VRAM_SNAPSHOT_SIZE {
+            self.scanline_bg_bitmap_vram.invalidate();
+        }
+        if offset >= VRAM_MIRROR_BASE {
+            self.scanline_obj_vram.invalidate();
+        }
+    }
+
     pub fn snapshot_scanline_obj_vram(&mut self, line: u16) {
         let i = line as usize;
         if i < GBA_VISIBLE_LINES {
-            let start = i * OBJ_VRAM_SNAPSHOT_SIZE;
-            let end = start + OBJ_VRAM_SNAPSHOT_SIZE;
-            self.scanline_obj_vram[start..end]
-                .copy_from_slice(&self.vram[VRAM_MIRROR_BASE..VRAM_SIZE]);
+            self.scanline_obj_vram
+                .capture(i, &self.vram[VRAM_MIRROR_BASE..VRAM_SIZE]);
             self.scanline_obj_vram_valid[i] = true;
         }
     }
@@ -1327,10 +1330,8 @@ impl GbaBus {
     pub fn snapshot_scanline_bg_bitmap_vram(&mut self, line: u16) {
         let i = line as usize;
         if i < GBA_VISIBLE_LINES {
-            let start = i * BG_BITMAP_VRAM_SNAPSHOT_SIZE;
-            let end = start + BG_BITMAP_VRAM_SNAPSHOT_SIZE;
-            self.scanline_bg_bitmap_vram[start..end]
-                .copy_from_slice(&self.vram[..BG_BITMAP_VRAM_SNAPSHOT_SIZE]);
+            self.scanline_bg_bitmap_vram
+                .capture(i, &self.vram[..BG_BITMAP_VRAM_SNAPSHOT_SIZE]);
             self.scanline_bg_bitmap_vram_valid[i] = true;
         }
     }
@@ -1378,11 +1379,11 @@ impl GbaBus {
 
         let offset = (addr as usize).wrapping_sub(VRAM_BASE as usize);
         if (VRAM_MIRROR_BASE..VRAM_SIZE).contains(&offset) {
-            self.scanline_obj_vram[i * OBJ_VRAM_SNAPSHOT_SIZE + (offset - VRAM_MIRROR_BASE)]
+            self.scanline_obj_vram.read(i, offset - VRAM_MIRROR_BASE)
         } else if (VRAM_MIRROR_START..(VRAM_MIRROR_START + OBJ_VRAM_SNAPSHOT_SIZE))
             .contains(&offset)
         {
-            self.scanline_obj_vram[i * OBJ_VRAM_SNAPSHOT_SIZE + (offset - VRAM_MIRROR_START)]
+            self.scanline_obj_vram.read(i, offset - VRAM_MIRROR_START)
         } else {
             self.read_vram8(addr)
         }
@@ -1396,7 +1397,7 @@ impl GbaBus {
 
         let offset = (addr as usize).wrapping_sub(VRAM_BASE as usize);
         if offset < BG_BITMAP_VRAM_SNAPSHOT_SIZE {
-            self.scanline_bg_bitmap_vram[i * BG_BITMAP_VRAM_SNAPSHOT_SIZE + offset]
+            self.scanline_bg_bitmap_vram.read(i, offset)
         } else {
             self.read_vram8(addr)
         }
@@ -1492,9 +1493,9 @@ impl GbaBus {
             row.fill(0);
         }
         self.scanline_pram_valid.fill(false);
-        self.scanline_bg_bitmap_vram.fill(0);
+        self.scanline_bg_bitmap_vram.reset();
         self.scanline_bg_bitmap_vram_valid.fill(false);
-        self.scanline_obj_vram.fill(0);
+        self.scanline_obj_vram.reset();
         self.scanline_obj_vram_valid.fill(false);
         for row in self.scanline_oam.iter_mut() {
             row.fill(0);
@@ -1503,6 +1504,7 @@ impl GbaBus {
         self.wave_ram = [0; 32];
         self.pram.fill(0);
         self.pram_snapshot.fill(0);
+        self.invalidate_vram_snapshots();
         self.vram.fill(0);
         self.vram_snapshot.fill(0);
         self.oam_snapshot.fill(0);
@@ -1621,6 +1623,7 @@ impl GbaBus {
     }
 
     pub fn vram_mut(&mut self) -> &mut [u8] {
+        self.invalidate_vram_snapshots();
         &mut self.vram
     }
 
@@ -2072,6 +2075,7 @@ impl GbaBus {
             PRAM_BASE..=0x0500_03FF => duplicate_byte_write(&mut self.pram, PRAM_BASE, addr, value),
             VRAM_BASE..=0x0601_FFFF => {
                 let aligned = vram_index(addr) & !1;
+                self.invalidate_vram_snapshot_range(aligned);
                 self.vram[aligned] = value;
                 self.vram[aligned + 1] = value;
             }
@@ -2118,6 +2122,7 @@ impl GbaBus {
             }
             VRAM_BASE..=0x0601_FFFF => {
                 let index = vram_index(addr) & !1;
+                self.invalidate_vram_snapshot_range(index);
                 self.vram[index] = low;
                 self.vram[index + 1] = high;
             }
@@ -2158,6 +2163,7 @@ impl GbaBus {
     }
 
     pub fn clear_vram(&mut self) {
+        self.invalidate_vram_snapshots();
         self.vram.fill(0);
     }
 

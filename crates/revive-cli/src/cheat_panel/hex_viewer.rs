@@ -12,7 +12,6 @@ const COLOR_ASCII: Color32 = Color32::from_rgb(0x88, 0xAA, 0x88);
 
 #[derive(Debug)]
 pub(crate) struct HexViewerState {
-    prev_ram: Vec<u8>,
     goto_addr: String,
     scroll_to_row: Option<usize>,
     edit_addr: String,
@@ -22,7 +21,6 @@ pub(crate) struct HexViewerState {
 impl HexViewerState {
     pub(crate) fn new() -> Self {
         Self {
-            prev_ram: Vec::new(),
             goto_addr: String::new(),
             scroll_to_row: None,
             edit_addr: String::new(),
@@ -30,15 +28,11 @@ impl HexViewerState {
         }
     }
 
-    pub(crate) fn update_prev(&mut self, previous: &[u8]) {
-        self.prev_ram.clear();
-        self.prev_ram.extend_from_slice(previous);
-    }
-
     pub(crate) fn show(
         &mut self,
         ui: &mut egui::Ui,
         snapshot: &MemorySnapshot,
+        previous: &[u8],
         writes: &mut Vec<MemoryWrite>,
     ) {
         let total_rows = snapshot.len().div_ceil(BYTES_PER_ROW);
@@ -108,7 +102,7 @@ impl HexViewerState {
                         continue;
                     }
                     let byte = snapshot.bytes()[addr];
-                    let changed = self.prev_ram.get(addr).copied() != Some(byte);
+                    let changed = previous.get(addr).copied() != Some(byte);
                     append_text(
                         &mut job,
                         &format!("{byte:02X} "),
