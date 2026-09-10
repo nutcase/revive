@@ -2,9 +2,7 @@ use std::path::{Path, PathBuf};
 
 use megadrive_core::{Button as MdButton, Cartridge as MdCartridge};
 
-use super::common::{
-    fixed_audio_spec, load_state_slot, replace_audio_buffer, save_state_slot, write_byte,
-};
+use super::common::{fixed_audio_spec, load_state_slot, save_state_slot, write_byte};
 use crate::paths::rom_stem;
 use crate::system::{
     AudioSpec, FrameView, MemoryRegion, PixelFormat, Result, SystemKind, VirtualButton,
@@ -68,7 +66,7 @@ impl MegaDriveAdapter {
 
     pub fn drain_audio_i16(&mut self, out: &mut Vec<i16>) {
         let max_samples = ((self.audio_sample_rate_hz as usize) / 20).max(1024) * 2;
-        replace_audio_buffer(out, self.emulator.drain_audio_samples(max_samples));
+        self.emulator.drain_audio_samples_into(max_samples, out);
     }
 
     pub fn set_button(&mut self, player: u8, button: VirtualButton, pressed: bool) {

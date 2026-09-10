@@ -1,5 +1,9 @@
 use revive_core::PixelFormat;
 
+#[cfg(test)]
+#[path = "wgpu_game_tests.rs"]
+mod tests;
+
 const GAME_SHADER: &str = r#"
 struct VertexIn {
     @location(0) pos: vec2<f32>,
@@ -46,6 +50,7 @@ pub(crate) struct WgpuGameRenderer {
     texture: Option<wgpu::Texture>,
     bind_group: Option<wgpu::BindGroup>,
     texture_size: (usize, usize),
+    texture_format: wgpu::TextureFormat,
     upload_rgba: Vec<u8>,
 }
 
@@ -143,6 +148,7 @@ impl WgpuGameRenderer {
             texture: None,
             bind_group: None,
             texture_size: (0, 0),
+            texture_format: wgpu::TextureFormat::Rgba8UnormSrgb,
             upload_rgba: Vec::new(),
         }
     }
@@ -156,12 +162,16 @@ impl WgpuGameRenderer {
         height: usize,
         format: PixelFormat,
     ) {
-        if (width, height) != self.texture_size {
-            self.create_texture(device, width, height);
+        let texture_format = match format {
+            PixelFormat::Bgra8888 => wgpu::TextureFormat::Bgra8UnormSrgb,
+            PixelFormat::Rgb24 | PixelFormat::Rgba8888 => wgpu::TextureFormat::Rgba8UnormSrgb,
+        };
+        if (width, height) != self.texture_size || texture_format != self.texture_format {
+            self.create_texture(device, width, height, texture_format);
         }
 
         let upload = match format {
-            PixelFormat::Rgba8888 => data,
+            PixelFormat::Rgba8888 | PixelFormat::Bgra8888 => data,
             PixelFormat::Rgb24 => {
                 self.upload_rgba.resize(width * height * 4, 0);
                 for (src, dst) in data
@@ -172,19 +182,6 @@ impl WgpuGameRenderer {
                     dst[1] = src[1];
                     dst[2] = src[2];
                     dst[3] = 0xFF;
-                }
-                self.upload_rgba.as_slice()
-            }
-            PixelFormat::Bgra8888 => {
-                self.upload_rgba.resize(width * height * 4, 0);
-                for (src, dst) in data
-                    .chunks_exact(4)
-                    .zip(self.upload_rgba.chunks_exact_mut(4))
-                {
-                    dst[0] = src[2];
-                    dst[1] = src[1];
-                    dst[2] = src[0];
-                    dst[3] = src[3];
                 }
                 self.upload_rgba.as_slice()
             }
@@ -244,7 +241,13 @@ impl WgpuGameRenderer {
         render_pass.draw(0..6, 0..1);
     }
 
-    fn create_texture(&mut self, device: &wgpu::Device, width: usize, height: usize) {
+    fn create_texture(
+        &mut self,
+        device: &wgpu::Device,
+        width: usize,
+        height: usize,
+        format: wgpu::TextureFormat,
+    ) {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("game_frame_texture"),
             size: wgpu::Extent3d {
@@ -255,9 +258,9 @@ impl WgpuGameRenderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[wgpu::TextureFormat::Rgba8UnormSrgb],
+            view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -278,6 +281,7 @@ impl WgpuGameRenderer {
         self.texture = Some(texture);
         self.bind_group = Some(bind_group);
         self.texture_size = (width, height);
+        self.texture_format = format;
     }
 }
 

@@ -9,6 +9,7 @@ mod events;
 mod frame_clock;
 mod hud;
 mod input;
+mod perf;
 mod render;
 mod session;
 mod state;
@@ -16,12 +17,13 @@ mod wgpu_game;
 mod window;
 
 use audio::{feed_audio, open_audio_output};
-use cheat_panel::{CheatPanel, MemorySnapshot};
+use cheat_panel::CheatPanel;
 use egui_input::EguiInput;
 use events::{process_sdl_events, EventLoopAction};
 use frame_clock::FrameClock;
 use hud::HudToast;
 use input::{release_keyboard_input, sync_keyboard_input, InputState};
+use perf::{FrameProfiler, Stage};
 use render::{RenderState, UiRenderData};
 use revive_cheat::CheatManager;
 use revive_core::{CoreInstance, SystemKind, ROM_EXTENSIONS};
@@ -231,6 +233,9 @@ fn run_sdl_loop(
     let mut prev_panel_visible = cheat_panel.is_visible();
     let input_debug = std::env::var_os("REVIVE_INPUT_DEBUG").is_some();
     let mut front_retry_frames = 12u8;
+    let mut core_changed = true;
+    let mut was_paused = false;
+    let mut profiler = FrameProfiler::from_env();
 
     'running: loop {
         let should_enable_text_input = cheat_panel.is_visible();
@@ -254,6 +259,7 @@ fn run_sdl_loop(
                 &mut input_state,
                 &mut hud_toast,
                 input_debug,
+                &mut core_changed,
             ),
             EventLoopAction::Exit
         ) {
@@ -271,26 +277,45 @@ fn run_sdl_loop(
         } else {
             sync_keyboard_input(&mut core, &event_pump, &input_state);
         }
-        apply_cheats(&mut core, &cheats);
-        if !cheat_panel.is_paused() {
+        let core_started = profiler.start();
+        core_changed |= apply_cheats(&mut core, &cheats);
+        let paused = cheat_panel.is_paused();
+        if !paused {
             core.step_frame()?;
+            core_changed = true;
         }
-        apply_cheats(&mut core, &cheats);
+        core_changed |= apply_cheats(&mut core, &cheats);
 
-        if let Some(output) = audio_output.as_ref() {
-            feed_audio(output, &mut core, &mut audio_scratch);
-        } else {
-            core.drain_audio_i16(&mut audio_scratch);
+        profiler.end(Stage::Core, core_started);
+        let audio_started = profiler.start();
+        if !paused {
+            if let Some(output) = audio_output.as_ref() {
+                feed_audio(output, &mut core, &mut audio_scratch);
+            } else {
+                core.drain_audio_i16(&mut audio_scratch);
+            }
+        } else if !was_paused {
+            if let Some(output) = audio_output.as_ref() {
+                output.clear();
+            }
+        }
+        was_paused = paused;
+        profiler.end(Stage::Audio, audio_started);
+        let upload_started = profiler.start();
+
+        if core_changed {
+            render_state.upload_core_frame(&mut core, &mut window, cheat_panel.is_visible());
+            cheat_panel.invalidate_memory();
+            core_changed = false;
         }
 
-        render_state.upload_core_frame(&mut core, &mut window, cheat_panel.is_visible());
-
+        profiler.end(Stage::Upload, upload_started);
         let draw_ui = cheat_panel.is_visible() || hud_toast.is_visible();
         if draw_ui {
+            let ui_started = profiler.start();
             let ctx = egui_input.begin_frame(&window);
             let mut pending_writes = Vec::new();
             if cheat_panel.is_visible() {
-                let live_memory = MemorySnapshot::capture(&core);
                 #[allow(deprecated)]
                 let panel_resp = egui::SidePanel::right("cheat_panel")
                     .resizable(true)
@@ -302,7 +327,7 @@ fn run_sdl_loop(
                             .show(ui, |ui| {
                                 pending_writes = cheat_panel.show_panel(
                                     ui,
-                                    &live_memory,
+                                    &core,
                                     &mut cheats,
                                     Some(cheat_path),
                                 );
@@ -318,6 +343,8 @@ fn run_sdl_loop(
 
             let full_output = egui_input.end_frame(&mut video);
             let primitives = egui_input.tessellate(&full_output);
+            profiler.end(Stage::Ui, ui_started);
+            let present_started = profiler.start();
             render_state.present_frame(
                 &window,
                 cheat_panel.is_visible(),
@@ -328,18 +355,24 @@ fn run_sdl_loop(
                 }),
             )?;
 
+            profiler.end(Stage::Present, present_started);
             for write in pending_writes {
-                core.write_memory_byte(&write.region, write.offset, write.value);
+                core_changed |= core.write_memory_byte(&write.region, write.offset, write.value);
             }
         } else {
+            let present_started = profiler.start();
             render_state.present_frame(&window, false, None)?;
+            profiler.end(Stage::Present, present_started);
         }
 
         if front_retry_frames > 0 {
             bring_window_to_front(&mut window);
             front_retry_frames -= 1;
         }
+        let wait_started = profiler.start();
         frame_clock.wait();
+        profiler.end(Stage::Wait, wait_started);
+        profiler.finish_frame();
     }
 
     if let Err(err) = core.flush_persistent_save() {
@@ -349,12 +382,53 @@ fn run_sdl_loop(
     Ok(())
 }
 
-fn apply_cheats(core: &mut CoreInstance, cheats: &CheatManager) {
+fn apply_cheats(core: &mut CoreInstance, cheats: &CheatManager) -> bool {
+    let mut changed = false;
     for entry in cheats.enabled_entries() {
-        core.write_memory_byte(&entry.region, entry.offset as usize, entry.value);
+        let offset = entry.offset as usize;
+        if core
+            .read_memory(&entry.region)
+            .and_then(|bytes| bytes.get(offset))
+            != Some(&entry.value)
+        {
+            changed |= core.write_memory_byte(&entry.region, offset, entry.value);
+        }
     }
+    changed
 }
 
 fn sdl_error(message: sdl3::Error) -> io::Error {
     io::Error::other(message.to_string())
+}
+
+#[cfg(test)]
+fn test_core() -> CoreInstance {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let path = std::env::temp_dir().join(format!(
+        "revive-test-{}-{}.sg",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::write(&path, [0u8; 16384]).unwrap();
+    let core = CoreInstance::load_rom(&path, Some(SystemKind::Sg1000)).unwrap();
+    std::fs::remove_file(path).unwrap();
+    core
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cheats_only_invalidate_when_memory_changes() {
+        let mut core = test_core();
+        let mut cheats = CheatManager::new();
+        cheats.add("wram", 0, 42, "test".into());
+        assert!(apply_cheats(&mut core, &cheats));
+        assert_eq!(core.read_memory("wram").unwrap()[0], 42);
+        assert!(!apply_cheats(&mut core, &cheats));
+        core.write_memory_byte("wram", 0, 3);
+        assert!(apply_cheats(&mut core, &cheats));
+    }
 }

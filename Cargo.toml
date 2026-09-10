@@ -41,6 +41,9 @@ opt-level = 3
 [profile.dev.package.pce-core]
 opt-level = 3
 
+[profile.dev.package.sega8-common]
+opt-level = 3
+
 [profile.dev.package.sg1000-core]
 opt-level = 3
 

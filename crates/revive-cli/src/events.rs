@@ -1,4 +1,4 @@
-use crate::cheat_panel::{CheatPanel, MemorySnapshot};
+use crate::cheat_panel::CheatPanel;
 use crate::egui_input::EguiInput;
 use crate::hud::HudToast;
 use crate::input::{button_label, keycode_button, InputState};
@@ -23,6 +23,7 @@ pub(crate) fn process_sdl_events(
     input_state: &mut InputState,
     hud_toast: &mut HudToast,
     input_debug: bool,
+    core_changed: &mut bool,
 ) -> EventLoopAction {
     for event in event_pump.poll_iter() {
         if cheat_panel.is_visible() {
@@ -38,6 +39,7 @@ pub(crate) fn process_sdl_events(
                 input_state,
                 hud_toast,
                 input_debug,
+                core_changed,
             ),
             EventLoopAction::Exit
         ) {
@@ -56,6 +58,7 @@ fn handle_event(
     input_state: &mut InputState,
     hud_toast: &mut HudToast,
     input_debug: bool,
+    core_changed: &mut bool,
 ) -> EventLoopAction {
     match event {
         Event::Quit { .. } => EventLoopAction::Exit,
@@ -103,6 +106,7 @@ fn handle_event(
                 *scancode,
                 *keymod,
                 input_debug,
+                core_changed,
             );
             EventLoopAction::Continue
         }
@@ -129,12 +133,14 @@ fn handle_key_down(
     scancode: Option<Scancode>,
     keymod: Mod,
     input_debug: bool,
+    core_changed: &mut bool,
 ) {
     if key == Keycode::Tab {
-        toggle_cheat_panel(core, cheat_panel);
+        cheat_panel.toggle();
         return;
     }
     if handle_state_key(core, key, scancode, keymod, hud_toast) {
+        *core_changed = true;
         return;
     }
     if cheat_panel.is_visible() && egui_ctx.egui_wants_keyboard_input() {
@@ -168,15 +174,6 @@ fn handle_key_up(
         input_state.set(button, false);
     } else if input_debug {
         eprintln!("input: key up {key:?}");
-    }
-}
-
-fn toggle_cheat_panel(core: &CoreInstance, cheat_panel: &mut CheatPanel) {
-    if cheat_panel.is_visible() {
-        cheat_panel.hide();
-    } else {
-        let live_memory = MemorySnapshot::capture(core);
-        cheat_panel.toggle(&live_memory);
     }
 }
 

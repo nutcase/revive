@@ -120,8 +120,16 @@ impl AudioBus {
     }
 
     pub fn drain_samples(&mut self, max_samples: usize) -> Vec<i16> {
+        let mut out = Vec::new();
+        self.drain_samples_into(max_samples, &mut out);
+        out
+    }
+
+    /// Replace the output while retaining its allocation and any undrained samples.
+    pub fn drain_samples_into(&mut self, max_samples: usize, out: &mut Vec<i16>) {
+        out.clear();
         let count = max_samples.min(self.sample_buffer.len());
-        self.sample_buffer.drain(0..count).collect()
+        out.extend(self.sample_buffer.drain(..count));
     }
 }
 
@@ -139,5 +147,30 @@ impl Default for AudioBus {
             sample_accumulator: 0,
             sample_buffer: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod buffer_tests {
+    use super::*;
+
+    #[test]
+    fn reusable_drain_preserves_order_remainder_and_capacity() {
+        let mut audio = AudioBus::default();
+        audio.sample_buffer.extend([1, -2, 3, -4, 5, -6]);
+        let mut out = Vec::with_capacity(16);
+        out.push(99);
+        let allocation = out.as_ptr();
+        audio.drain_samples_into(4, &mut out);
+        assert_eq!(out, [1, -2, 3, -4]);
+        assert_eq!(audio.pending_samples(), 2);
+        audio.drain_samples_into(0, &mut out);
+        assert!(out.is_empty());
+        assert_eq!(audio.pending_samples(), 2);
+        audio.drain_samples_into(100, &mut out);
+        assert_eq!(out, [5, -6]);
+        audio.drain_samples_into(100, &mut out);
+        assert!(out.is_empty());
+        assert_eq!(out.as_ptr(), allocation);
     }
 }

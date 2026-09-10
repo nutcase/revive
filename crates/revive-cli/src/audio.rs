@@ -10,6 +10,12 @@ pub(crate) struct AudioOutput {
     channels: usize,
 }
 
+impl AudioOutput {
+    pub(crate) fn clear(&self) {
+        let _ = self.stream.clear();
+    }
+}
+
 pub(crate) fn open_audio_output(
     sdl: &sdl3::Sdl,
     core: &mut CoreInstance,
