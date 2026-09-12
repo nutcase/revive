@@ -248,3 +248,55 @@ Final workspace tests: **1,677 passed, 0 failed, 16 ignored**. The ignored GPU
 readback test also passed when run explicitly. Workspace Clippy completed with
 warnings, including existing HUD float-literal warnings and chunk-iteration
 style suggestions in the new GPU tests. The release build also completed.
+
+## PCE sprite span rendering
+
+The sprite renderer now visits each accepted sprite's clipped horizontal span
+instead of searching the sprite list at every display pixel. Each 16-pixel
+pattern row loads its four VRAM words once per span. A scanline-local occupancy
+mask preserves the first opaque sprite's ownership even when the background
+hides that pixel; transparent pixels do not claim ownership. Sprite selection,
+cell-slot limits and overflow reporting retain the prior behavior. No persistent
+cache, public API, or save-state layout changes are introduced.
+
+The pre-change pixel-first renderer is retained only in tests. Differential
+coverage compares pixels, line counts, VDC status and serialized bus state for
+256 combinations of scenes and rendering options: horizontal/vertical flips,
+all sprite sizes, clipping and per-line display offsets/widths, background
+priority, overlap/transparency, VRAM wrapping, current/snapshotted VRAM,
+programmed vertical windows, CG plane selection, row interleaving, raw pattern
+indices, reverse priority and enabled/disabled sprite limits. A separate
+regression verifies that an opaque sprite behind BG still blocks a later
+sprite above BG. Existing sprite/SATB/save-state tests also pass.
+
+### Measurements
+
+Apple M2, release profile; reference and optimized renderers in the same test
+binary. Three sequential runs after compilation, each with 20 warm-up frames
+and six paired batches of 200 calls, alternating reference/optimized order.
+The table gives the median of each run's batch medians. Each call renders the
+sprite pass for a 512-by-240 framebuffer with the normal sprite limit. The
+fixtures use deterministic synthetic patterns and SATB data. Source setup,
+allocation and assertions are outside the timed region.
+
+| Sprite workload | Reference (µs/frame) | Spans (µs/frame) | Reduction |
+| --- | ---: | ---: | ---: |
+| Spread, including clipped edges | 1058.385 | 209.461 | 80.2% |
+| Dense rows | 1013.654 | 221.445 | 78.2% |
+| Overlapping sprites | 217.968 | 50.896 | 76.6% |
+| Offscreen sprites | 660.178 | 47.317 | 92.8% |
+| Transparent overlapping sprites | 288.631 | 62.534 | 78.3% |
+
+These are sprite-pass times, including sprite selection, not complete emulated
+frame times or game FPS. CPU, background rendering, audio and presentation are
+outside this benchmark. Whole-game mean/p95 improvements remain unmeasured.
+
+```sh
+cargo test -p pce-core
+cargo test --release -p pce-core benchmark_pce_sprite_spans -- --ignored --nocapture --test-threads=1
+```
+
+Validation: `cargo test --workspace --no-fail-fast` passed with **1,679 passed,
+0 failed, 17 ignored**. Targeted Clippy (`pce-core`, `revive-core`, `revive-cli`,
+all targets) and `cargo build --release` completed with existing warnings.
+Formatting checks for changed Rust files and whitespace checks pass.
