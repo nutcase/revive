@@ -103,6 +103,11 @@ impl Bus {
         <Self as Sega8BusDevices>::drain_audio_samples_into(self, max_samples, out);
     }
 
+    /// Controls host sample delivery without stopping audio hardware clocks.
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        <Self as Sega8BusDevices>::set_audio_output_enabled(self, enabled);
+    }
+
     pub fn set_audio_output_sample_rate_hz(&mut self, hz: u32) {
         <Self as Sega8BusDevices>::set_audio_output_sample_rate_hz(self, hz);
     }

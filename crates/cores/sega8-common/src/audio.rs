@@ -152,6 +152,7 @@ pub struct Audio {
     output_sample_rate_hz: u64,
     sample_accumulator: u64,
     sample_buffer: Vec<i16>,
+    output_enabled: AudioOutputEnabled,
 }
 
 impl Audio {
@@ -164,6 +165,14 @@ impl Audio {
 
     pub fn output_channels(&self) -> u8 {
         Self::OUTPUT_CHANNELS
+    }
+
+    /// Controls host sample delivery without stopping audio hardware clocks.
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.output_enabled.0 = enabled;
+        if !enabled {
+            self.sample_buffer.clear();
+        }
     }
 
     pub fn set_output_sample_rate_hz(&mut self, hz: u32) {
@@ -181,8 +190,10 @@ impl Audio {
         self.sample_accumulator %= Z80_CLOCK_HZ;
         for _ in 0..produced {
             let sample = self.psg.next_sample(sample_rate_hz as u32);
-            self.sample_buffer.push(sample);
-            self.sample_buffer.push(sample);
+            if self.output_enabled.0 {
+                self.sample_buffer.push(sample);
+                self.sample_buffer.push(sample);
+            }
         }
     }
 
@@ -215,6 +226,7 @@ impl Default for Audio {
             output_sample_rate_hz: Self::DEFAULT_OUTPUT_SAMPLE_RATE_HZ,
             sample_accumulator: 0,
             sample_buffer: Vec::new(),
+            output_enabled: AudioOutputEnabled::default(),
         }
     }
 }
@@ -222,6 +234,37 @@ impl Default for Audio {
 #[cfg(test)]
 mod buffer_tests {
     use super::*;
+
+    #[test]
+    fn disabled_output_preserves_synthesis_state_and_resumed_pcm() {
+        let mut audible = Audio::default();
+        for value in [0x85, 0x02, 0x90, 0xE4, 0xF3] {
+            audible.write_psg(value);
+        }
+        let mut muted = audible.clone();
+        muted.set_audio_output_enabled(false);
+        for _ in 0..1000 {
+            audible.step(127);
+            muted.step(127);
+        }
+        assert_eq!(muted.pending_samples(), 0);
+        assert!(audible.drain_samples(usize::MAX).iter().any(|&s| s != 0));
+        // Both sample buffers are empty, and the host flag has no wire bytes.
+        let config = bincode::config::standard();
+        assert_eq!(
+            bincode::encode_to_vec(&audible, config).unwrap(),
+            bincode::encode_to_vec(&muted, config).unwrap()
+        );
+        muted.set_audio_output_enabled(true);
+        for _ in 0..100 {
+            audible.step(127);
+            muted.step(127);
+        }
+        assert_eq!(
+            audible.drain_samples(usize::MAX),
+            muted.drain_samples(usize::MAX)
+        );
+    }
 
     #[test]
     fn reusable_drain_preserves_order_remainder_and_capacity() {
@@ -243,3 +286,28 @@ mod buffer_tests {
         assert_eq!(out.as_ptr(), allocation);
     }
 }
+
+/// Host-only output setting. Deliberately absent from legacy save-state bytes.
+#[derive(Debug, Clone, Copy)]
+pub struct AudioOutputEnabled(pub bool);
+impl Default for AudioOutputEnabled {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+impl bincode::Encode for AudioOutputEnabled {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        _: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        Ok(())
+    }
+}
+impl<C> bincode::Decode<C> for AudioOutputEnabled {
+    fn decode<D: bincode::de::Decoder<Context = C>>(
+        _: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        Ok(Self::default())
+    }
+}
+bincode::impl_borrow_decode!(AudioOutputEnabled);

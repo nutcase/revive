@@ -75,6 +75,7 @@ pub(crate) struct GbApu {
     hpf_prev_out_l: f32,
     hpf_prev_out_r: f32,
     audio_samples: Vec<i16>,
+    audio_output_enabled: bool,
 }
 
 impl Default for GbApu {
@@ -115,6 +116,7 @@ impl Default for GbApu {
             hpf_prev_out_l: 0.0,
             hpf_prev_out_r: 0.0,
             audio_samples: Vec::new(),
+            audio_output_enabled: true,
         }
     }
 }
@@ -253,8 +255,18 @@ impl GbApu {
             if self.audio_samples.len() + 2 >= AUDIO_SAMPLE_BUFFER_LIMIT {
                 self.audio_samples.clear();
             }
-            self.audio_samples.push(left);
-            self.audio_samples.push(right);
+            if self.audio_output_enabled {
+                self.audio_samples.push(left);
+                self.audio_samples.push(right);
+            }
+        }
+    }
+
+    /// Controls host sample delivery without stopping audio hardware clocks.
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.audio_output_enabled = enabled;
+        if !enabled {
+            self.audio_samples.clear();
         }
     }
 
@@ -888,4 +900,45 @@ fn gb_audio_hpf_alpha() -> f32 {
             .map(|value| value.clamp(0.90, 0.9999))
             .unwrap_or(DEFAULT_GB_AUDIO_HPF_ALPHA)
     })
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+    #[test]
+    fn disabled_output_preserves_channel_and_filter_state() {
+        let mut audible = GbApu::default();
+        let mut muted = GbApu::default();
+        let mut io = [0; 128];
+        let mut muted_io = [0; 128];
+        for (apu, regs) in [(&mut audible, &mut io), (&mut muted, &mut muted_io)] {
+            for (addr, value) in [
+                (NR52, 0x80),
+                (NR50, 0x77),
+                (NR51, 0x11),
+                (NR11, 0x80),
+                (NR12, 0xF0),
+                (NR13, 0x80),
+                (NR14, 0x87),
+            ] {
+                apu.write_reg(addr, value, regs);
+            }
+        }
+        muted.set_audio_output_enabled(false);
+        audible.mix_audio_for_cycles(70_224, &mut io);
+        muted.mix_audio_for_cycles(70_224, &mut muted_io);
+        assert!(muted.audio_samples.is_empty());
+        assert!(audible.audio_samples.iter().any(|&s| s != 0));
+        audible.audio_samples.clear(); // compare hardware state after the normal host drain
+        let mut a = crate::state::StateWriter::new();
+        let mut b = crate::state::StateWriter::new();
+        audible.serialize_state(&mut a);
+        muted.serialize_state(&mut b);
+        assert_eq!(a.into_vec(), b.into_vec());
+        assert_eq!(io, muted_io);
+        muted.set_audio_output_enabled(true);
+        audible.mix_audio_for_cycles(4096, &mut io);
+        muted.mix_audio_for_cycles(4096, &mut muted_io);
+        assert_eq!(audible.audio_samples, muted.audio_samples);
+    }
 }

@@ -72,6 +72,11 @@ pub trait Sega8BusDevices {
         self.audio_mut().drain_samples_into(max_samples, out);
     }
 
+    /// Controls host sample delivery without stopping audio hardware clocks.
+    fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.audio_mut().set_audio_output_enabled(enabled);
+    }
+
     fn set_audio_output_sample_rate_hz(&mut self, hz: u32) {
         self.audio_mut().set_output_sample_rate_hz(hz);
     }

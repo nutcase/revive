@@ -172,6 +172,14 @@ impl Emulator {
         self.cycles
     }
 
+    /// Controls host sample delivery without stopping audio hardware clocks.
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.bus.set_audio_output_enabled(enabled);
+        if !enabled {
+            self.audio_buffer.clear();
+        }
+    }
+
     pub fn set_audio_batch_size(&mut self, samples: usize) {
         self.audio_batch_size = samples.max(1);
     }

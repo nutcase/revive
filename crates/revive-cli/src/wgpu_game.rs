@@ -30,6 +30,20 @@ fn vs_main(in: VertexIn) -> VertexOut {
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     return textureSample(game_texture, game_sampler, in.uv);
 }
+
+@fragment
+fn fs_rgb(in: VertexOut) -> @location(0) vec4<f32> {
+    let size = textureDimensions(game_texture);
+    let logical_size = vec2<u32>(size.x / 3u, size.y);
+    let pixel = min(vec2<u32>(max(in.uv, vec2<f32>(0.0)) * vec2<f32>(logical_size)), logical_size - vec2<u32>(1u));
+    let base = vec2<i32>(i32(pixel.x * 3u), i32(pixel.y));
+    let c = vec3<f32>(textureLoad(game_texture, base, 0).r,
+        textureLoad(game_texture, base + vec2<i32>(1, 0), 0).r,
+        textureLoad(game_texture, base + vec2<i32>(2, 0), 0).r);
+    // Match Rgba8UnormSrgb sampling; alpha is opaque for RGB24.
+    let linear = select(pow((c + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4)), c / 12.92, c <= vec3<f32>(0.04045));
+    return vec4<f32>(linear, 1.0);
+}
 "#;
 
 #[repr(C)]
@@ -51,7 +65,7 @@ pub(crate) struct WgpuGameRenderer {
     bind_group: Option<wgpu::BindGroup>,
     texture_size: (usize, usize),
     texture_format: wgpu::TextureFormat,
-    upload_rgba: Vec<u8>,
+    rgb_pipeline: wgpu::RenderPipeline,
 }
 
 impl WgpuGameRenderer {
@@ -86,43 +100,47 @@ impl WgpuGameRenderer {
             bind_group_layouts: &[Some(&bind_group_layout)],
             immediate_size: 0,
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("game_frame_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &VERTEX_ATTRIBUTES,
-                }],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: target_format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let create_pipeline = |entry| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("game_frame_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &VERTEX_ATTRIBUTES,
+                    }],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some(entry),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: target_format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let pipeline = create_pipeline("fs_main");
+        let rgb_pipeline = create_pipeline("fs_rgb");
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("game_frame_sampler"),
             mag_filter: wgpu::FilterMode::Nearest,
@@ -149,7 +167,7 @@ impl WgpuGameRenderer {
             bind_group: None,
             texture_size: (0, 0),
             texture_format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            upload_rgba: Vec::new(),
+            rgb_pipeline,
         }
     }
 
@@ -164,28 +182,18 @@ impl WgpuGameRenderer {
     ) {
         let texture_format = match format {
             PixelFormat::Bgra8888 => wgpu::TextureFormat::Bgra8UnormSrgb,
-            PixelFormat::Rgb24 | PixelFormat::Rgba8888 => wgpu::TextureFormat::Rgba8UnormSrgb,
+            PixelFormat::Rgb24 => wgpu::TextureFormat::R8Unorm,
+            PixelFormat::Rgba8888 => wgpu::TextureFormat::Rgba8UnormSrgb,
         };
         if (width, height) != self.texture_size || texture_format != self.texture_format {
             self.create_texture(device, width, height, texture_format);
         }
 
-        let upload = match format {
-            PixelFormat::Rgba8888 | PixelFormat::Bgra8888 => data,
-            PixelFormat::Rgb24 => {
-                self.upload_rgba.resize(width * height * 4, 0);
-                for (src, dst) in data
-                    .chunks_exact(3)
-                    .zip(self.upload_rgba.chunks_exact_mut(4))
-                {
-                    dst[0] = src[0];
-                    dst[1] = src[1];
-                    dst[2] = src[2];
-                    dst[3] = 0xFF;
-                }
-                self.upload_rgba.as_slice()
-            }
-        };
+        // Packed RGB bytes are uploaded directly. Unpack and sRGB decoding
+        // happen in the fragment shader, without changing core/state layouts.
+        let packed_rgb = format == PixelFormat::Rgb24;
+        let upload_width = width * if packed_rgb { 3 } else { 1 };
+        let bytes_per_row = width * if packed_rgb { 3 } else { 4 };
 
         if let Some(texture) = &self.texture {
             queue.write_texture(
@@ -195,14 +203,14 @@ impl WgpuGameRenderer {
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                upload,
+                data,
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some((width * 4) as u32),
+                    bytes_per_row: Some(bytes_per_row as u32),
                     rows_per_image: Some(height as u32),
                 },
                 wgpu::Extent3d {
-                    width: width as u32,
+                    width: upload_width as u32,
                     height: height as u32,
                     depth_or_array_layers: 1,
                 },
@@ -235,7 +243,11 @@ impl WgpuGameRenderer {
         );
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
 
-        render_pass.set_pipeline(&self.pipeline);
+        render_pass.set_pipeline(if self.texture_format == wgpu::TextureFormat::R8Unorm {
+            &self.rgb_pipeline
+        } else {
+            &self.pipeline
+        });
         render_pass.set_bind_group(0, bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.draw(0..6, 0..1);
@@ -251,7 +263,12 @@ impl WgpuGameRenderer {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("game_frame_texture"),
             size: wgpu::Extent3d {
-                width: width as u32,
+                width: (width
+                    * if format == wgpu::TextureFormat::R8Unorm {
+                        3
+                    } else {
+                        1
+                    }) as u32,
                 height: height as u32,
                 depth_or_array_layers: 1,
             },

@@ -3328,3 +3328,34 @@ fn psg_dc_blocker_keeps_centered_wave_mean_near_zero() {
         "DC blocker should keep centered waveform mean near zero (mean={mean})"
     );
 }
+
+#[test]
+fn disabled_audio_delivery_keeps_psg_state_and_clock() {
+    let mut audible = Bus::new();
+    let mut muted = Bus::new();
+    for bus in [&mut audible, &mut muted] {
+        bus.write_io(0x1C60, 0);
+        for value in [0x10, 1, 0, 0x1F] {
+            bus.write_io(0x1C61, value);
+        }
+        bus.write_io(0x1C60, PSG_REG_CH_CONTROL as u8);
+        bus.write_io(0x1C61, PSG_CH_CTRL_KEY_ON | 0x1F);
+    }
+    muted.set_audio_output_enabled(false);
+    for _ in 0..5000 {
+        audible.tick(17, true);
+        muted.tick(17, true);
+    }
+    assert!(muted.audio_buffer.is_empty());
+    assert!(!audible.audio_buffer.is_empty());
+    audible.audio_buffer.clear();
+    let config = bincode::config::standard();
+    let a = bincode::encode_to_vec(&audible, config).unwrap();
+    let b = bincode::encode_to_vec(&muted, config).unwrap();
+    assert_eq!(a.len(), b.len());
+    assert_eq!(a.iter().zip(&b).position(|(a, b)| a != b), None);
+    muted.set_audio_output_enabled(true);
+    audible.tick(5000, true);
+    muted.tick(5000, true);
+    assert_eq!(audible.audio_buffer, muted.audio_buffer);
+}

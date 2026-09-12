@@ -1,0 +1,268 @@
+diff --git a/crates/cores/snes/src/ppu/framebuffer.rs b/crates/cores/snes/src/ppu/framebuffer.rs
+index 456dd20..a741851 100644
+--- a/crates/cores/snes/src/ppu/framebuffer.rs
++++ b/crates/cores/snes/src/ppu/framebuffer.rs
+@@ -1,6 +1,26 @@
+ use super::{trace_sample_dot_config, trace_scanline_state_config, Ppu};
+
+ impl Ppu {
++    // Both screens see the same OAM/VRAM at this dot. Share only when
++    // both OBJ windows are open; keep the tracing path unchanged.
++    pub(crate) fn shared_sprite_pixel_for_screens(
++        &self,
++        x: u16,
++        y: u16,
++    ) -> Option<(u32, u8, bool)> {
++        if self.line_need_subscreen
++            && self.line_main_has_obj
++            && self.line_sub_has_obj
++            && !self.should_mask_sprite(x, true)
++            && !self.should_mask_sprite(x, false)
++            && trace_sample_dot_config().is_none()
++        {
++            Some(self.get_sprite_pixel_common(x, y, true, true))
++        } else {
++            None
++        }
++    }
++
+     pub fn set_framebuffer_rendering_enabled(&mut self, enabled: bool) {
+         self.framebuffer_rendering_enabled = enabled;
+     }
+@@ -208,9 +228,11 @@ impl Ppu {
+
+         self.update_obj_time_over_at_x(x as u16);
+
++        let shared_obj = self.shared_sprite_pixel_for_screens(x as u16, y as u16);
++
+         // Use existing per-pixel composition with color math and windows.
+         let (mut main_color, mut main_layer_id, mut main_obj_math_allowed) =
+-            self.render_main_screen_pixel_with_layer_cached(x as u16, y as u16);
++            self.render_main_screen_pixel_with_layer_cached(x as u16, y as u16, shared_obj);
+         let main_transparent = main_color == 0;
+         // If main pixel is transparent, treat as backdrop for color math decisions
+         if main_color == 0 {
+@@ -221,7 +243,7 @@ impl Ppu {
+         let hires_out = self.line_hires_out;
+         let need_subscreen = self.line_need_subscreen;
+         let (sub_color, sub_layer_id, sub_transparent, sub_obj_math_allowed) = if need_subscreen {
+-            self.render_sub_screen_pixel_with_layer_cached(x as u16, y as u16)
++            self.render_sub_screen_pixel_with_layer_cached(x as u16, y as u16, shared_obj)
+         } else {
+             (0, 5, true, true)
+         };
+diff --git a/crates/cores/snes/src/ppu/rendering/screen_pixel.rs b/crates/cores/snes/src/ppu/rendering/screen_pixel.rs
+index 55f7563..4a8c5a4 100644
+--- a/crates/cores/snes/src/ppu/rendering/screen_pixel.rs
++++ b/crates/cores/snes/src/ppu/rendering/screen_pixel.rs
+@@ -9,6 +9,18 @@ impl Ppu {
+         enables: u8,
+         has_bg: bool,
+         has_obj: bool,
++    ) -> (u32, u8, bool) {
++        let sprite = self.get_sprite_pixel_common(x, y, has_obj, true);
++        self.render_main_screen_pixel_with_layer_internal_with_obj(x, y, enables, has_bg, sprite)
++    }
++
++    pub(crate) fn render_main_screen_pixel_with_layer_internal_with_obj(
++        &mut self,
++        x: u16,
++        y: u16,
++        enables: u8,
++        has_bg: bool,
++        sprite: (u32, u8, bool),
+     ) -> (u32, u8, bool) {
+         // BGとスプライトの情報を取得
+         let (bg_color, bg_priority, bg_id) = if has_bg {
+@@ -16,11 +28,7 @@ impl Ppu {
+         } else {
+             (0, 0, 0)
+         };
+-        let (sprite_color, sprite_priority, sprite_math_allowed) = if has_obj {
+-            self.get_sprite_pixel_common(x, y, true, true)
+-        } else {
+-            (0, 0, true)
+-        };
++        let (sprite_color, sprite_priority, sprite_math_allowed) = sprite;
+         if let Some(cfg) = trace_sample_dot_config() {
+             if self.frame == cfg.frame && x == cfg.x && y == cfg.y {
+                 let z_bg = self.z_rank_for_bg(bg_id, bg_priority);
+@@ -126,13 +134,16 @@ impl Ppu {
+         &mut self,
+         x: u16,
+         y: u16,
++        shared_obj: Option<(u32, u8, bool)>,
+     ) -> (u32, u8, bool) {
+-        self.render_main_screen_pixel_with_layer_internal(
++        let sprite = shared_obj
++            .unwrap_or_else(|| self.get_sprite_pixel_common(x, y, self.line_main_has_obj, true));
++        self.render_main_screen_pixel_with_layer_internal_with_obj(
+             x,
+             y,
+             self.line_main_enables,
+             self.line_main_has_bg,
+-            self.line_main_has_obj,
++            sprite,
+         )
+     }
+
+@@ -310,6 +321,18 @@ impl Ppu {
+         y: u16,
+         has_bg: bool,
+         has_obj: bool,
++    ) -> (u32, u8, bool, bool) {
++        let sprite = self.get_sprite_pixel_common(x, y, has_obj, false);
++        self.render_sub_screen_pixel_with_layer_internal_with_obj(x, y, has_bg, has_obj, sprite)
++    }
++
++    pub(crate) fn render_sub_screen_pixel_with_layer_internal_with_obj(
++        &mut self,
++        x: u16,
++        y: u16,
++        has_bg: bool,
++        has_obj: bool,
++        sprite: (u32, u8, bool),
+     ) -> (u32, u8, bool, bool) {
+         if !has_bg && !has_obj {
+             // For color math, an empty subscreen behaves like a transparent source
+@@ -321,8 +344,7 @@ impl Ppu {
+         } else {
+             (0, 0, 0)
+         };
+-        let (sprite_color, sprite_priority, sprite_math_allowed) =
+-            self.get_sprite_pixel_common(x, y, has_obj, false);
++        let (sprite_color, sprite_priority, sprite_math_allowed) = sprite;
+         let (final_color, layer_id) = self.composite_pixel_with_layer(
+             bg_color,
+             bg_priority,
+@@ -357,12 +379,16 @@ impl Ppu {
+         &mut self,
+         x: u16,
+         y: u16,
++        shared_obj: Option<(u32, u8, bool)>,
+     ) -> (u32, u8, bool, bool) {
+-        self.render_sub_screen_pixel_with_layer_internal(
++        let sprite = shared_obj
++            .unwrap_or_else(|| self.get_sprite_pixel_common(x, y, self.line_sub_has_obj, false));
++        self.render_sub_screen_pixel_with_layer_internal_with_obj(
+             x,
+             y,
+             self.line_sub_has_bg,
+             self.line_sub_has_obj,
++            sprite,
+         )
+     }
+
+diff --git a/crates/cores/snes/src/ppu/sprites.rs b/crates/cores/snes/src/ppu/sprites.rs
+index cad53af..e3f568d 100644
+--- a/crates/cores/snes/src/ppu/sprites.rs
++++ b/crates/cores/snes/src/ppu/sprites.rs
+@@ -992,6 +992,108 @@ mod tests {
+     use super::*;
+     use crate::ppu::Ppu;
+
++    fn shared_obj_fixture() -> Ppu {
++        let mut ppu = Ppu::new();
++        ppu.line_need_subscreen = true;
++        ppu.line_main_has_obj = true;
++        ppu.line_sub_has_obj = true;
++        ppu.line_main_has_bg = false;
++        ppu.line_sub_has_bg = false;
++        ppu.line_main_enables = 0x10;
++        ppu.line_window_prepared = true;
++        for (i, byte) in ppu.vram.iter_mut().enumerate() {
++            *byte = (i * 17 + 93) as u8;
++        }
++        for (i, color) in ppu.cgram.chunks_exact_mut(2).enumerate() {
++            color.copy_from_slice(&((i as u16 * 117) & 0x7FFF).to_le_bytes());
++        }
++        ppu.rebuild_cgram_rgb_cache();
++        ppu.line_sprites = (0..32)
++            .map(|i| {
++                ppu.build_sprite_data(
++                    i * 7,
++                    0,
++                    i,
++                    (i % 8) as u8,
++                    (i % 4) as u8,
++                    i % 2 == 0,
++                    i % 3 == 0,
++                    SpriteSize::Small,
++                    16,
++                    16,
++                    0,
++                )
++            })
++            .collect();
++        ppu
++    }
++
++    #[test]
++    fn shared_obj_matches_independent_screens_with_windows_and_time_over() {
++        let mut ppu = shared_obj_fixture();
++        let mut visible = 0;
++        for cutoff in [0, 1, 16, 32] {
++            ppu.sprite_time_over = cutoff != 32;
++            ppu.sprite_draw_disabled = cutoff != 32;
++            ppu.sprite_timeover_first_idx = cutoff;
++            for enables in 0..4 {
++                ppu.line_main_has_obj = enables & 1 != 0;
++                ppu.line_sub_has_obj = enables & 2 != 0;
++                for x in 0..256u16 {
++                    ppu.main_obj_window_lut[x as usize] = u8::from(x % 11 < 3);
++                    ppu.sub_obj_window_lut[x as usize] = u8::from(x % 17 < 5);
++                    let main = ppu.render_main_screen_pixel_with_layer_internal(
++                        x,
++                        0,
++                        0x10,
++                        false,
++                        enables & 1 != 0,
++                    );
++                    let sub = ppu.render_sub_screen_pixel_with_layer_internal(
++                        x,
++                        0,
++                        false,
++                        enables & 2 != 0,
++                    );
++                    visible += usize::from(main.0 != 0);
++                    let shared = ppu.shared_sprite_pixel_for_screens(x, 0);
++                    assert_eq!(
++                        ppu.render_main_screen_pixel_with_layer_cached(x, 0, shared),
++                        main
++                    );
++                    assert_eq!(
++                        ppu.render_sub_screen_pixel_with_layer_cached(x, 0, shared),
++                        sub
++                    );
++                }
++            }
++        }
++        assert!(visible > 0);
++    }
++
++    #[test]
++    #[ignore = "manual release benchmark"]
++    fn benchmark_shared_obj_screens() {
++        use std::{hint::black_box, time::Instant};
++        let mut ppu = shared_obj_fixture();
++        for shared in [false, true] {
++            let start = Instant::now();
++            for _ in 0..1000 {
++                for x in 0..256 {
++                    let x = black_box(x);
++                    let cached = if shared {
++                        ppu.shared_sprite_pixel_for_screens(x, 0)
++                    } else {
++                        None
++                    };
++                    black_box(ppu.render_main_screen_pixel_with_layer_cached(x, 0, cached));
++                    black_box(ppu.render_sub_screen_pixel_with_layer_cached(x, 0, cached));
++                }
++            }
++            eprintln!("SNES shared_obj={shared}: {:?}", start.elapsed());
++        }
++    }
++
+     fn sprite_test_ppu() -> Ppu {
+         let mut ppu = Ppu::new();
+         // Tile 0 row 0: leftmost pixel = color 1.

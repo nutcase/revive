@@ -1,4 +1,5 @@
 mod dma;
+mod line_vram;
 mod mode4;
 mod plane;
 mod ports;
@@ -194,7 +195,7 @@ pub struct Vdp {
     line_vsram: [[u16; VSRAM_WORDS]; FRAME_HEIGHT],
     line_hscroll: [[u16; 2]; FRAME_HEIGHT],
     line_cram: [[u16; CRAM_COLORS]; FRAME_HEIGHT],
-    line_vram: Vec<[u8; VRAM_SIZE]>,
+    line_vram: line_vram::LineVram,
     line_vram_latch_enabled: bool,
     debug_line_latch_next: bool,
     control_latch: Option<u16>,
@@ -275,7 +276,7 @@ impl Vdp {
             line_vsram: [[0; VSRAM_WORDS]; FRAME_HEIGHT],
             line_hscroll: [[0; 2]; FRAME_HEIGHT],
             line_cram: [[0; CRAM_COLORS]; FRAME_HEIGHT],
-            line_vram: vec![[0; VRAM_SIZE]; FRAME_HEIGHT],
+            line_vram: line_vram::LineVram::default(),
             line_vram_latch_enabled: debug_flags::line_vram_latch(),
             debug_line_latch_next: debug_flags::line_latch_next(),
             control_latch: None,
@@ -655,7 +656,7 @@ impl Vdp {
             self.line_hscroll[line] = self.current_line_hscroll_words(line, &self.registers);
             self.line_cram[line] = self.cram;
             if self.line_vram_latch_enabled {
-                self.line_vram[line].copy_from_slice(&self.vram);
+                self.line_vram.capture(line, &self.vram);
             }
         }
     }
@@ -667,7 +668,7 @@ impl Vdp {
             self.line_hscroll[line] = self.current_line_hscroll_words(line, &self.registers);
             self.line_cram[line] = self.cram;
             if self.line_vram_latch_enabled {
-                self.line_vram[line].copy_from_slice(&self.vram);
+                self.line_vram.capture(line, &self.vram);
             }
         }
     }

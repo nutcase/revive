@@ -82,6 +82,11 @@ impl Bus {
         self.ppu.get_buffer()
     }
 
+    /// Controls host sample delivery without stopping audio hardware clocks.
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.apu.set_audio_output_enabled(enabled);
+    }
+
     pub fn set_audio_ring(&mut self, ring: std::sync::Arc<crate::SpscRingBuffer>) {
         self.apu.set_audio_ring(ring);
     }

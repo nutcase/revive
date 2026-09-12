@@ -9,6 +9,7 @@ use crate::system::{AudioSpec, FrameView, MemoryRegion, PixelFormat, Result, Vir
 pub struct NesAdapter {
     nes: Nes,
     rom_path: PathBuf,
+    audio_output_enabled: bool,
     title: String,
     controllers: [u8; 2],
     audio_sample_rate_hz: u32,
@@ -25,6 +26,7 @@ impl NesAdapter {
         Ok(Self {
             nes,
             rom_path: path.to_path_buf(),
+            audio_output_enabled: true,
             title: rom_stem(path),
             controllers: [0, 0],
             audio_sample_rate_hz: 44_100,
@@ -36,7 +38,13 @@ impl NesAdapter {
         &self.title
     }
 
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.audio_output_enabled = enabled;
+        self.nes.set_audio_output_enabled(enabled);
+    }
+
     pub fn step_frame(&mut self) -> Result<()> {
+        self.nes.set_audio_output_enabled(self.audio_output_enabled);
         const MAX_STEPS_PER_FRAME: usize = 50_000;
         for _ in 0..MAX_STEPS_PER_FRAME {
             if self.nes.step() {

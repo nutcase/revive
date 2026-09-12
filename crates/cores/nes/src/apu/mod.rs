@@ -47,6 +47,7 @@ pub struct Apu {
     // or fall back to the Vec buffer.
     audio_ring: Option<Arc<crate::audio_ring::SpscRingBuffer>>,
     output_buffer: Vec<f32>,
+    output_enabled: bool,
     sample_rate: f32,
     cpu_clock_rate: f32,
 

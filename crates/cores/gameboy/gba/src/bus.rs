@@ -607,6 +607,7 @@ pub struct GbaBus {
     direct_sound_b_latch_period_cycles: u32,
     audio_cycle_accum: u32,
     audio_samples: Vec<i16>,
+    audio_output_enabled: bool,
     audio_post_filter_enabled: bool,
     audio_post_hpf_alpha: f32,
     audio_post_lpf_alpha: f32,
@@ -706,6 +707,7 @@ impl Default for GbaBus {
             direct_sound_b_latch_period_cycles: 1,
             audio_cycle_accum: 0,
             audio_samples: Vec::new(),
+            audio_output_enabled: true,
             audio_post_filter_enabled: false,
             audio_post_hpf_alpha: 0.0,
             audio_post_lpf_alpha: 0.0,
@@ -1649,8 +1651,20 @@ impl GbaBus {
         out
     }
 
+    /// Controls host sample delivery without stopping audio hardware clocks.
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        if self.audio_output_enabled != enabled || !enabled {
+            self.audio_samples.clear();
+        }
+        self.audio_output_enabled = enabled;
+    }
+
     pub fn take_audio_samples_into(&mut self, out: &mut Vec<i16>) {
         out.clear();
+        if !self.audio_output_enabled {
+            self.audio_samples.clear();
+            return;
+        }
         std::mem::swap(out, &mut self.audio_samples);
     }
 
@@ -2274,6 +2288,12 @@ impl GbaBus {
         for _ in 0..overflows {
             self.trigger_special_sound_dma(timer_channel);
         }
+    }
+
+    pub(crate) fn cycles_until_audio_sample(&self) -> u32 {
+        self.audio_cycles_per_sample()
+            .saturating_sub(self.audio_cycle_accum)
+            .max(1)
     }
 
     pub(crate) fn mix_audio_for_cycles(&mut self, cycles: u32) {
@@ -3571,7 +3591,7 @@ impl GbaBus {
             }
         }
 
-        if self.audio_samples.len() + 2 >= AUDIO_SAMPLE_BUFFER_LIMIT {
+        if !self.audio_output_enabled || self.audio_samples.len() + 2 >= AUDIO_SAMPLE_BUFFER_LIMIT {
             self.audio_samples.clear();
         }
         self.audio_samples.push(left);
@@ -4421,6 +4441,44 @@ fn dma_step_address(addr: u32, mode: u8, unit_size: u32, is_dest: bool) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disabled_output_retains_slew_history_without_accumulating_pcm() {
+        let mut audible = GbaBus::default();
+        let mut muted = GbaBus::default();
+        for bus in [&mut audible, &mut muted] {
+            bus.reset();
+            bus.write16(0x0400_0084, 0x0080);
+            bus.write16(0x0400_0082, 0x0304);
+            bus.write32(0x0400_00A0, 0x6F371101);
+            bus.on_timer_overflow(0, 1);
+        }
+        muted.set_audio_output_enabled(false);
+        let mut heard_audio = false;
+        for _ in 0..3 {
+            for _ in 0..200 {
+                audible.mix_audio_for_cycles(512);
+                muted.mix_audio_for_cycles(512);
+                assert!(muted.audio_samples.len() <= 2);
+                let len = audible.audio_samples.len();
+                assert_eq!(&audible.audio_samples[len - 2..], &muted.audio_samples);
+            }
+            heard_audio |= audible.take_audio_samples().iter().any(|&s| s != 0);
+            assert!(muted.take_audio_samples().is_empty());
+            let mut a = crate::state::StateWriter::new();
+            let mut b = crate::state::StateWriter::new();
+            audible.serialize_state(&mut a);
+            muted.serialize_state(&mut b);
+            let (a, b) = (a.into_vec(), b.into_vec());
+            assert_eq!(a.len(), b.len());
+            assert_eq!(a.iter().zip(&b).position(|(a, b)| a != b), None);
+        }
+        assert!(heard_audio);
+        muted.set_audio_output_enabled(true);
+        audible.mix_audio_for_cycles(4096);
+        muted.mix_audio_for_cycles(4096);
+        assert_eq!(audible.take_audio_samples(), muted.take_audio_samples());
+    }
 
     fn mix_audio_samples_for_test(bus: &mut GbaBus, sample_count: u32) {
         bus.mix_audio_for_cycles(sample_count.saturating_mul(AUDIO_BASE_CYCLES_PER_SAMPLE));

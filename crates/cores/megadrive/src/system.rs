@@ -101,6 +101,11 @@ impl Emulator {
         self.memory.drain_audio_samples_into(max_samples, out);
     }
 
+    /// Controls host sample delivery without stopping audio hardware clocks.
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.memory.set_audio_output_enabled(enabled);
+    }
+
     pub fn set_audio_output_sample_rate_hz(&mut self, hz: u32) {
         self.memory.set_audio_output_sample_rate_hz(hz);
     }

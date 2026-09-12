@@ -655,6 +655,14 @@ impl Bus {
         self.vdc.map_entry_address(tile_row, tile_col)
     }
 
+    /// Controls host sample delivery without stopping audio hardware clocks.
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        *self.audio_output_disabled = !enabled;
+        if !enabled {
+            self.audio_buffer.clear();
+        }
+    }
+
     fn enqueue_audio_samples(&mut self, phi_cycles: u32) {
         self.audio_total_phi_cycles.0 = self
             .audio_total_phi_cycles
@@ -667,7 +675,9 @@ impl Bus {
             self.audio_phi_accumulator -= MASTER_CLOCK_HZ as u64;
             let psg_cycles = self.psg_cycles_for_host_sample();
             let sample = self.psg.render_host_sample(psg_cycles);
-            self.audio_buffer.push(sample);
+            if !*self.audio_output_disabled {
+                self.audio_buffer.push(sample);
+            }
             self.audio_total_generated_samples.0 =
                 self.audio_total_generated_samples.0.saturating_add(1);
         }

@@ -387,4 +387,5 @@ pub struct AudioBus {
     output_sample_rate_hz: u64,
     sample_accumulator: u64,
     sample_buffer: Vec<i16>,
+    output_enabled: sega8_common::audio::AudioOutputEnabled,
 }
