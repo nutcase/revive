@@ -17,6 +17,14 @@ impl AudioBus {
         Self::OUTPUT_CHANNELS
     }
 
+    /// Controls host sample delivery without stopping audio hardware clocks.
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.output_enabled.0 = enabled;
+        if !enabled {
+            self.sample_buffer.clear();
+        }
+    }
+
     pub fn set_output_sample_rate_hz(&mut self, hz: u32) {
         self.output_sample_rate_hz = (hz as u64).clamp(8_000, 192_000);
     }
@@ -74,8 +82,10 @@ impl AudioBus {
             let left = (psg_sample + ym_left as i32).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
             let right =
                 (psg_sample + ym_right as i32).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-            self.sample_buffer.push(left);
-            self.sample_buffer.push(right);
+            if self.output_enabled.0 {
+                self.sample_buffer.push(left);
+                self.sample_buffer.push(right);
+            }
         }
     }
 
@@ -146,6 +156,7 @@ impl Default for AudioBus {
             output_sample_rate_hz: Self::DEFAULT_OUTPUT_SAMPLE_RATE_HZ,
             sample_accumulator: 0,
             sample_buffer: Vec::new(),
+            output_enabled: sega8_common::audio::AudioOutputEnabled::default(),
         }
     }
 }
@@ -153,6 +164,37 @@ impl Default for AudioBus {
 #[cfg(test)]
 mod buffer_tests {
     use super::*;
+
+    #[test]
+    fn disabled_output_preserves_synthesis_state_and_resumed_pcm() {
+        let mut audible = AudioBus::default();
+        for value in [0x85, 0x02, 0x90, 0xE4, 0xF3] {
+            audible.write_psg(value);
+        }
+        let mut muted = audible.clone();
+        muted.set_audio_output_enabled(false);
+        for _ in 0..1000 {
+            audible.step(127);
+            muted.step(127);
+        }
+        assert_eq!(muted.pending_samples(), 0);
+        assert!(audible.drain_samples(usize::MAX).iter().any(|&s| s != 0));
+        // Both sample buffers are empty, and the host flag has no wire bytes.
+        let config = bincode::config::standard();
+        assert_eq!(
+            bincode::encode_to_vec(&audible, config).unwrap(),
+            bincode::encode_to_vec(&muted, config).unwrap()
+        );
+        muted.set_audio_output_enabled(true);
+        for _ in 0..100 {
+            audible.step(127);
+            muted.step(127);
+        }
+        assert_eq!(
+            audible.drain_samples(usize::MAX),
+            muted.drain_samples(usize::MAX)
+        );
+    }
 
     #[test]
     fn reusable_drain_preserves_order_remainder_and_capacity() {

@@ -596,6 +596,11 @@ impl GbBus {
         self.debug_hdma_bytes_copied
     }
 
+    /// Controls host sample delivery without stopping audio hardware clocks.
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.apu.set_audio_output_enabled(enabled);
+    }
+
     pub fn mix_audio_for_cycles(&mut self, cycles: u32) {
         self.apu.mix_audio_for_cycles(cycles, &mut self.io);
     }

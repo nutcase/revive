@@ -29,6 +29,7 @@ const FRAMEBUFFER_SIZE: usize = (GB_LCD_WIDTH as usize) * (GB_LCD_HEIGHT as usiz
 pub struct GbPpu {
     line_cycles: u32,
     stat_irq_latched: bool,
+    lcd_off_cleared: bool,
     frame_rgba8888: [u8; FRAMEBUFFER_SIZE],
 }
 
@@ -53,6 +54,7 @@ impl Default for GbPpu {
         Self {
             line_cycles: 0,
             stat_irq_latched: false,
+            lcd_off_cleared: false,
             frame_rgba8888: [0; FRAMEBUFFER_SIZE],
         }
     }
@@ -67,6 +69,7 @@ impl GbPpu {
         self.line_cycles = 0;
         self.stat_irq_latched = false;
         self.clear_framebuffer_to_color([0xE0, 0xF8, 0xD0, 0xFF]);
+        self.lcd_off_cleared = true;
         bus.set_ppu_ly(0);
         bus.set_ppu_mode(0);
         self.update_stat(bus);
@@ -85,13 +88,19 @@ impl GbPpu {
         self.line_cycles = r.read_u32()?;
         self.stat_irq_latched = r.read_bool()?;
         r.read_into_slice(&mut self.frame_rgba8888)?;
+        // Derived state is not serialized. The next LCD-off step must clear
+        // even if a legacy state contains a visible frame.
+        self.lcd_off_cleared = false;
         Ok(())
     }
 
     pub fn step(&mut self, cycles: u32, bus: &mut GbBus) -> bool {
         if (bus.ppu_lcdc() & LCDC_ENABLE) == 0 {
             self.line_cycles = 0;
-            self.clear_framebuffer_to_color([0xE0, 0xF8, 0xD0, 0xFF]);
+            if !self.lcd_off_cleared {
+                self.clear_framebuffer_to_color([0xE0, 0xF8, 0xD0, 0xFF]);
+                self.lcd_off_cleared = true;
+            }
             bus.set_ppu_ly(0);
             bus.set_ppu_mode(0);
             self.stat_irq_latched = false;
@@ -99,6 +108,7 @@ impl GbPpu {
             return false;
         }
 
+        self.lcd_off_cleared = false;
         let mut frame_ready = false;
         let mut remaining = cycles;
 
@@ -498,6 +508,60 @@ mod tests {
         rom[0x0148] = 0x00;
         rom[0x0149] = 0x00;
         rom
+    }
+
+    #[test]
+    fn lcd_off_transitions_and_restored_frame_clear_like_repeated_fill() {
+        let mut bus = GbBus::default();
+        let mut ppu = GbPpu::default();
+        ppu.reset(&mut bus);
+        let off_frame = ppu.frame_rgba8888().to_vec();
+        for _ in 0..2 {
+            // Render an enabled LCD with a different palette, then switch off.
+            bus.write8(0xFF47, 0xFF);
+            bus.write8(0xFF40, 0x91);
+            ppu.step(CYCLES_PER_LINE, &mut bus);
+            assert_ne!(ppu.frame_rgba8888(), off_frame);
+            let mut writer = crate::state::StateWriter::new();
+            ppu.serialize_state(&mut writer);
+            let saved = writer.into_vec();
+            bus.write8(0xFF40, 0);
+            for _ in 0..100 {
+                ppu.step(4, &mut bus);
+            }
+            assert_eq!(ppu.frame_rgba8888(), off_frame);
+            assert_eq!(bus.ppu_ly(), 0);
+            assert_eq!(bus.ppu_stat() & 3, 0);
+            ppu.deserialize_state(&mut crate::state::StateReader::new(&saved))
+                .unwrap();
+            ppu.step(4, &mut bus);
+            assert_eq!(ppu.frame_rgba8888(), off_frame);
+        }
+        ppu.reset(&mut bus);
+        assert_eq!(ppu.frame_rgba8888(), off_frame);
+    }
+
+    #[test]
+    #[ignore = "manual release benchmark"]
+    fn benchmark_lcd_off_steps() {
+        use std::{hint::black_box, time::Instant};
+        for repeated_fill in [true, false] {
+            let mut bus = GbBus::default();
+            bus.write8(0xFF40, 0);
+            let mut ppu = GbPpu::default();
+            let start = Instant::now();
+            for _ in 0..100_000 {
+                if repeated_fill {
+                    ppu.lcd_off_cleared = false;
+                }
+                ppu.step(black_box(4), &mut bus);
+                black_box(ppu.frame_rgba8888());
+            }
+            eprintln!(
+                "LCD off repeated_fill={repeated_fill}: {:?}",
+                start.elapsed()
+            );
+        }
     }
 
     #[test]

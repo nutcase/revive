@@ -181,6 +181,11 @@ impl MemoryMap {
         &self.audio
     }
 
+    /// Controls host sample delivery without stopping audio hardware clocks.
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.audio.set_audio_output_enabled(enabled);
+    }
+
     pub fn set_audio_output_sample_rate_hz(&mut self, hz: u32) {
         self.audio.set_output_sample_rate_hz(hz);
     }

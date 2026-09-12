@@ -21,6 +21,7 @@ trait Sega8Emulator: Sized {
     fn frame_buffer(&self) -> &[u8];
     fn audio_output_channels(&self) -> u8;
     fn set_audio_output_sample_rate_hz(&mut self, hz: u32);
+    fn set_audio_output_enabled(&mut self, enabled: bool);
     fn drain_audio_samples_into(&mut self, max_samples: usize, out: &mut Vec<i16>);
     fn save_state_to_file(&self, path: &Path) -> Result<()>;
     fn load_state_from_file(&mut self, path: &Path) -> Result<()>;
@@ -64,6 +65,9 @@ impl Sega8Emulator for SgEmulator {
 
     fn set_audio_output_sample_rate_hz(&mut self, hz: u32) {
         SgEmulator::set_audio_output_sample_rate_hz(self, hz);
+    }
+    fn set_audio_output_enabled(&mut self, enabled: bool) {
+        SgEmulator::set_audio_output_enabled(self, enabled);
     }
 
     fn drain_audio_samples_into(&mut self, max_samples: usize, out: &mut Vec<i16>) {
@@ -110,6 +114,9 @@ impl Sega8Emulator for SmsEmulator {
 
     fn set_audio_output_sample_rate_hz(&mut self, hz: u32) {
         SmsEmulator::set_audio_output_sample_rate_hz(self, hz);
+    }
+    fn set_audio_output_enabled(&mut self, enabled: bool) {
+        SmsEmulator::set_audio_output_enabled(self, enabled);
     }
 
     fn drain_audio_samples_into(&mut self, max_samples: usize, out: &mut Vec<i16>) {
@@ -220,6 +227,7 @@ impl Sega8Platform for SmsEmulator {
 struct Sega8Adapter<E: Sega8Emulator> {
     emulator: E,
     rom_path: PathBuf,
+    audio_output_enabled: bool,
     title: String,
     audio_sample_rate_hz: u32,
 }
@@ -231,6 +239,7 @@ impl<E: Sega8Emulator> Sega8Adapter<E> {
         Ok(Self {
             emulator,
             rom_path: path.to_path_buf(),
+            audio_output_enabled: true,
             title: rom_stem(path),
             audio_sample_rate_hz: 44_100,
         })
@@ -241,6 +250,8 @@ impl<E: Sega8Emulator> Sega8Adapter<E> {
     }
 
     fn step_frame(&mut self) -> Result<()> {
+        self.emulator
+            .set_audio_output_enabled(self.audio_output_enabled);
         const MAX_STEPS_PER_FRAME: usize = 2_000;
         for _ in 0..MAX_STEPS_PER_FRAME {
             if self.emulator.step_frame_ready() {
@@ -339,6 +350,11 @@ macro_rules! impl_common_adapter {
 
             pub fn configure_audio_output(&mut self, sample_rate_hz: u32) {
                 self.0.configure_audio_output(sample_rate_hz);
+            }
+
+            pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+                self.0.audio_output_enabled = enabled;
+                self.0.emulator.set_audio_output_enabled(enabled);
             }
 
             pub fn drain_audio_i16(&mut self, out: &mut Vec<i16>) {

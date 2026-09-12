@@ -11,6 +11,7 @@ use crate::system::{
 pub struct MegaDriveAdapter {
     emulator: megadrive_core::Emulator,
     rom_path: PathBuf,
+    audio_output_enabled: bool,
     title: String,
     audio_sample_rate_hz: u32,
 }
@@ -26,6 +27,7 @@ impl MegaDriveAdapter {
         Ok(Self {
             emulator,
             rom_path: path.to_path_buf(),
+            audio_output_enabled: true,
             title,
             audio_sample_rate_hz: 44_100,
         })
@@ -35,7 +37,14 @@ impl MegaDriveAdapter {
         &self.title
     }
 
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.audio_output_enabled = enabled;
+        self.emulator.set_audio_output_enabled(enabled);
+    }
+
     pub fn step_frame(&mut self) -> Result<()> {
+        self.emulator
+            .set_audio_output_enabled(self.audio_output_enabled);
         const MAX_STEPS_PER_FRAME: usize = 100_000;
         for _ in 0..MAX_STEPS_PER_FRAME {
             if self.emulator.step().frame_ready {

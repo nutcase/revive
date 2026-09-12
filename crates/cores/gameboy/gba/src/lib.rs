@@ -238,6 +238,11 @@ impl GbaEmulator {
         self.bus.load_bios(bios);
     }
 
+    /// Controls host sample delivery without stopping audio hardware clocks.
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.bus.set_audio_output_enabled(enabled);
+    }
+
     pub fn set_keyinput_pressed_mask(&mut self, pressed_mask: u16) {
         self.bus.set_keyinput_pressed_mask(pressed_mask);
     }

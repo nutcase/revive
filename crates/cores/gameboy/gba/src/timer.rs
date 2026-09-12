@@ -67,23 +67,44 @@ impl GbaTimer {
         next
     }
 
-    /// HALT previously called step(1). Keep that exact timer/FIFO/mixer
-    /// ordering, including when an experimental audio granularity is set.
-    pub(crate) fn step_halted(&mut self, cycles: u32, bus: &mut GbaBus) {
-        for _ in 0..cycles {
-            self.step_timers_for_cycles(1, bus);
-            bus.mix_audio_for_cycles(1);
+    /// Keep the original ordering: advance audio for pre-overflow cycles,
+    /// then latch FIFO/DMA at the overflow cycle, then mix that cycle's audio.
+    fn step_exact(&mut self, mut cycles: u32, bus: &mut GbaBus) {
+        while cycles != 0 {
+            // Many active CPU instructions take one cycle. Avoid scheduling
+            // overhead when there is nothing to batch.
+            let chunk = if cycles == 1 {
+                1
+            } else {
+                let timer_event = self.cycles_until_event(bus);
+                let before_timer_event = timer_event.saturating_sub(1).max(1);
+                cycles
+                    .min(before_timer_event)
+                    .min(bus.cycles_until_audio_sample())
+            };
+            self.step_timers_for_cycles(chunk, bus);
+            bus.mix_audio_for_cycles(chunk);
+            cycles -= chunk;
         }
+    }
+
+    pub(crate) fn step_halted(&mut self, cycles: u32, bus: &mut GbaBus) {
+        self.step_exact(cycles, bus);
     }
 
     pub fn step(&mut self, cycles: u32, bus: &mut GbaBus) {
         let granularity = audio_timer_granularity();
-        let mut remaining = cycles;
-        while remaining != 0 {
-            let chunk = remaining.min(granularity);
-            remaining -= chunk;
-            self.step_timers_for_cycles(chunk, bus);
-            bus.mix_audio_for_cycles(chunk);
+        if granularity == 1 {
+            self.step_exact(cycles, bus);
+        } else {
+            // Retain the opt-in experimental coarse audio mode.
+            let mut remaining = cycles;
+            while remaining != 0 {
+                let chunk = remaining.min(granularity);
+                remaining -= chunk;
+                self.step_timers_for_cycles(chunk, bus);
+                bus.mix_audio_for_cycles(chunk);
+            }
         }
     }
 
@@ -161,6 +182,107 @@ fn audio_timer_granularity() -> u32 {
 mod tests {
     use super::*;
     use crate::bus::IRQ_TIMER0;
+
+    fn audio_timer_fixture(prescaler: u16) -> (GbaTimer, GbaBus) {
+        let mut bus = GbaBus::default();
+        bus.reset();
+        bus.write16(0x0400_0084, 0x0080); // master enable
+        bus.write16(0x0400_0082, 0x730C); // A: timer0; B: timer1, stereo
+        for i in 0..256u32 {
+            bus.write32(0x0300_2000 + i * 4, i.wrapping_mul(0x17315977));
+        }
+        for (dma, fifo) in [(0xBC, 0xA0), (0xC8, 0xA4)] {
+            bus.write32(0x0400_0000 + dma, 0x0300_2000);
+            bus.write32(0x0400_0000 + dma + 4, 0x0400_0000 + fifo);
+            bus.write16(0x0400_0000 + dma + 10, 0xB640);
+        }
+        bus.write16(0x0400_0100, 0xFFF9);
+        bus.write16(0x0400_0102, 0xC0 | prescaler);
+        bus.write16(0x0400_0104, 0xFFFD);
+        bus.write16(0x0400_0106, 0xC4); // cascade with IRQ
+        bus.write16(0x0400_0108, 0xFFFE);
+        bus.write16(0x0400_010A, 0xC4);
+        bus.write16(0x0400_010C, 0xFFFB);
+        bus.write16(0x0400_010E, 0xC1);
+        (GbaTimer::default(), bus)
+    }
+
+    fn state_bytes(timer: &GbaTimer, bus: &GbaBus) -> Vec<u8> {
+        let mut writer = StateWriter::new();
+        timer.serialize_state(&mut writer);
+        bus.serialize_state(&mut writer);
+        writer.into_vec()
+    }
+
+    #[test]
+    fn event_batches_match_single_cycle_timers_fifo_dma_and_pcm() {
+        for prescaler in 0..4 {
+            let (mut fast, mut fast_bus) = audio_timer_fixture(prescaler);
+            let (mut reference, mut reference_bus) = audio_timer_fixture(prescaler);
+            for phase in 0..4 {
+                for cycles in [1, 3, 17, 511, 1024, 4097] {
+                    fast.step_exact(cycles, &mut fast_bus);
+                    for _ in 0..cycles {
+                        reference.step_timers_for_cycles(1, &mut reference_bus);
+                        reference_bus.mix_audio_for_cycles(1);
+                    }
+                }
+                assert_eq!(
+                    fast_bus.take_audio_samples(),
+                    reference_bus.take_audio_samples(),
+                    "PCM prescaler={prescaler} phase={phase}"
+                );
+                let a = state_bytes(&fast, &fast_bus);
+                let b = state_bytes(&reference, &reference_bus);
+                assert_eq!(a.len(), b.len());
+                assert_eq!(
+                    a.iter().zip(&b).position(|(a, b)| a != b),
+                    None,
+                    "state prescaler={prescaler} phase={phase}"
+                );
+                // Reconfigure a running prescaler, disable/re-enable a timer,
+                // and change sound sample cadence between instruction batches.
+                for bus in [&mut fast_bus, &mut reference_bus] {
+                    bus.write16(
+                        0x0400_0102,
+                        if phase == 1 {
+                            0
+                        } else {
+                            0xC0 | ((prescaler + phase + 1) & 3)
+                        },
+                    );
+                    bus.write16(0x0400_0088, 0x200 | ((phase & 3) << 14));
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "manual release benchmark"]
+    fn benchmark_timer_event_batches() {
+        use std::{hint::black_box, time::Instant};
+        for cycles in [1, 4, 1000] {
+            for batched in [false, true] {
+                let (mut timer, mut bus) = audio_timer_fixture(1);
+                let start = Instant::now();
+                for _ in 0..(2_000_000 / cycles) {
+                    if batched {
+                        timer.step_exact(black_box(cycles), &mut bus);
+                    } else {
+                        for _ in 0..cycles {
+                            timer.step_timers_for_cycles(1, &mut bus);
+                            bus.mix_audio_for_cycles(1);
+                        }
+                    }
+                }
+                eprintln!(
+                    "timer chunk={cycles} batched={batched}: {:?}",
+                    start.elapsed()
+                );
+                black_box(bus.take_audio_samples());
+            }
+        }
+    }
 
     #[test]
     fn timer0_overflow_sets_irq_flag_when_enabled() {

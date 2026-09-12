@@ -139,6 +139,11 @@ impl Nes {
         self.bus.get_ppu_buffer()
     }
 
+    /// Controls host sample delivery without stopping audio hardware clocks.
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.bus.set_audio_output_enabled(enabled);
+    }
+
     /// Attach a ring buffer so the APU pushes samples directly as they
     /// are generated (no batching, no intermediate Vec).
     pub fn set_audio_ring(&mut self, ring: Arc<SpscRingBuffer>) {

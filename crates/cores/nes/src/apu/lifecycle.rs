@@ -30,6 +30,7 @@ impl Apu {
 
             audio_ring: None,
             output_buffer: Vec::new(),
+            output_enabled: true,
             sample_rate: 44100.0,
             cpu_clock_rate: 1789773.0,
 

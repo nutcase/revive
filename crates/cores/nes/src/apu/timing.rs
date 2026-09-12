@@ -64,6 +64,9 @@ impl Apu {
             let sample = self.produce_sample();
             // Push directly to ring buffer for jitter-free delivery,
             // fall back to Vec when no ring buffer is attached.
+            if !self.output_enabled {
+                return;
+            }
             if let Some(ref ring) = self.audio_ring {
                 ring.push_one(sample);
             } else {

@@ -22,6 +22,7 @@ use crate::system::{
 pub struct GameBoyAdapter {
     emulator: GbEmulator,
     rom_path: PathBuf,
+    audio_output_enabled: bool,
     title: String,
     system: SystemKind,
     pressed_mask: u8,
@@ -38,6 +39,7 @@ impl GameBoyAdapter {
         Ok(Self {
             emulator,
             rom_path: path.to_path_buf(),
+            audio_output_enabled: true,
             title: rom_stem(path),
             system,
             pressed_mask: 0,
@@ -53,7 +55,14 @@ impl GameBoyAdapter {
         &self.title
     }
 
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.audio_output_enabled = enabled;
+        self.emulator.set_audio_output_enabled(enabled);
+    }
+
     pub fn step_frame(&mut self) -> Result<()> {
+        self.emulator
+            .set_audio_output_enabled(self.audio_output_enabled);
         self.emulator.step_frame().map_err(|err| err.to_string())?;
         self.audio_sample_rate_hz = self.emulator.debug_audio_sample_rate_hz().max(8_000);
         Ok(())
@@ -209,6 +218,7 @@ pub struct GameBoyAdvanceAdapter {
     emulator: GbaEmulator,
     frame_buffer: GbaFrameBuffer,
     rom_path: PathBuf,
+    audio_output_enabled: bool,
     title: String,
     pressed_mask: u16,
     audio_sample_rate_hz: u32,
@@ -226,6 +236,7 @@ impl GameBoyAdvanceAdapter {
             emulator,
             frame_buffer: GbaFrameBuffer::new(),
             rom_path: path.to_path_buf(),
+            audio_output_enabled: true,
             title: rom_stem(path),
             pressed_mask: 0,
             audio_sample_rate_hz,
@@ -236,7 +247,14 @@ impl GameBoyAdvanceAdapter {
         &self.title
     }
 
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.audio_output_enabled = enabled;
+        self.emulator.set_audio_output_enabled(enabled);
+    }
+
     pub fn step_frame(&mut self) -> Result<()> {
+        self.emulator
+            .set_audio_output_enabled(self.audio_output_enabled);
         self.emulator
             .step_frame_with_render(&mut self.frame_buffer)
             .map_err(|err| err.to_string())?;
@@ -470,6 +488,7 @@ mod tests {
         let mut adapter = GameBoyAdapter {
             emulator: GbEmulator::new(GbModel::Dmg),
             rom_path: PathBuf::from("dummy.gb"),
+            audio_output_enabled: true,
             title: "dummy".to_string(),
             system: SystemKind::GameBoy,
             pressed_mask: 0,
@@ -490,6 +509,7 @@ mod tests {
             emulator: GbaEmulator::new(),
             frame_buffer: GbaFrameBuffer::new(),
             rom_path: PathBuf::from("dummy.gba"),
+            audio_output_enabled: true,
             title: "dummy".to_string(),
             pressed_mask: 0,
             audio_sample_rate_hz: 44_100,

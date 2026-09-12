@@ -154,3 +154,97 @@ cargo test --release -p emulator-gba benchmark_followup_render_halt_and_state --
 cargo test --release -p megadrive-core benchmark_fm_phase_cache -- --ignored --nocapture --test-threads=1
 cargo test --workspace
 ```
+
+## Third performance pass
+
+- GB/GBC clears the LCD-off framebuffer once per transition. Reset and state
+  restoration invalidate the derived flag as needed; the serialized PPU layout
+  is unchanged.
+- GBA advances timers/audio in batches ending at sample or timer boundaries.
+  Pre-overflow cycles finish before FIFO/DMA latching, and the overflow cycle's
+  audio is mixed afterwards. The experimental coarse mode remains opt-in.
+- Mega Drive allocates debug scanline VRAM history on first capture. Adjacent
+  identical lines share immutable storage, with copy-on-write for updates.
+  With capture disabled, the former 240 × 64 KiB = **15 MiB** allocation is absent.
+  Custom serialization preserves the old vector/array bytes in both directions.
+- RGB24 frames upload directly as packed R8 textures. The shader retrieves the
+  three channels and decodes sRGB, eliminating the per-frame CPU RGBA expansion
+  and reducing source texture bytes from four to three per pixel. Other pixel
+  formats keep their existing path. This trades CPU conversion for GPU work;
+  synchronized render measurements accompany the CPU upload measurements.
+- `load_rom_with_audio(..., false)` now reaches NES, GB/GBC, GBA, SG-1000,
+  Master System, Mega Drive and PCE, in addition to the existing SNES setting.
+  Hardware clocks, filters, oscillators and interrupts continue to advance;
+  host PCM accumulation is suppressed. GBA retains at most one stereo pair
+  for the existing slew limiter and clears it at the usual per-frame drain.
+  Adapters retain the host setting and reapply it before stepping after state
+  restoration. The setting adds no save-state bytes.
+
+### Third-pass verification and measurement
+
+Regression coverage includes LCD disable/re-enable and state restoration;
+GBA one-cycle timer/FIFO-DMA/PCM/state comparisons across prescalers and sound
+sample rates; legacy Mega Drive history bytes; muted/resumed synthesis state
+and PCM for each audio backend;
+and synthetic ROMs exercising every newly connected no-audio adapter.
+The explicit GPU readback test covers all 256 channel values, odd row widths,
+multiple rows and format changes (one code-value tolerance for sRGB rounding).
+
+Manual benchmarks are ignored tests, run explicitly after compilation:
+
+```sh
+cargo test --release -p emulator-gb benchmark_lcd_off_steps -- --ignored --nocapture --test-threads=1
+cargo test --release -p emulator-gba benchmark_timer_event_batches -- --ignored --nocapture --test-threads=1
+cargo test --release -p revive-cli benchmark_rgb_upload_and_render -- --ignored --nocapture --test-threads=1
+```
+
+Three sequential runs on Apple M2 / Metal, with compilation finished and the
+verification app closed. Medians below; all references and optimized paths
+are in the same binary. These are synthetic component measurements, not game
+FPS claims. The GPU benchmark warms up 20 frames, measures 100, and waits for
+GPU completion on every frame, so its total includes driver/scheduling latency.
+
+| Workload | Reference | Optimized | Change |
+| --- | ---: | ---: | ---: |
+| GB LCD off, 100,000 steps | 150.544 ms | 0.764 ms | 99.5% less |
+| GBA timers/audio, 2M cycles in 4-cycle calls | 35.137 ms | 14.192 ms | 59.6% less |
+| GBA timers/audio, 2M cycles in 1000-cycle calls | 34.386 ms | 1.169 ms | 96.6% less |
+| RGB CPU conversion/upload, 320×240 target | 150.795 µs/frame | 80.189 µs/frame | 46.8% less |
+| RGB CPU conversion/upload, 1280×960 target | 238.538 µs/frame | 163.312 µs/frame | 31.5% less |
+| RGB synchronized total, 320×240 target | 1.407 ms/frame | 1.323 ms/frame | 5.9% less |
+| RGB synchronized total, 1280×960 target | 1.635 ms/frame | 1.664 ms/frame | 1.7% more |
+
+One-cycle timer calls measured 36.779 ms versus 35.105 ms; they use the original
+per-cycle operations without event scheduling. Treat the small difference as
+measurement/compiler variation. RGB upload saves main-thread work and texture
+storage; an end-to-end improvement at enlarged window sizes was **not**
+established (individual 1280×960 runs varied in both directions). No claim is
+made that moving conversion to the GPU accelerates every GPU or window size.
+
+### Evaluated but not adopted: SNES shared OBJ lookup
+
+The main/sub-screen sharing candidate passed window/time-over pixel comparisons,
+but worsened the synthetic 256,000-pixel composition benchmark. The first
+implementation measured 132.582 ms versus 170.041 ms (three-run medians).
+A second version passed resolved sprite tuples directly into composition and
+used identical opaque coordinate inputs on both paths; it measured 193.761 ms
+versus 255.158 ms in a standalone release run. These two builds used different
+feature-unified dependency graphs, so compare **within** each pair only.
+The SNES runtime changes were removed; the remaining five candidates were kept.
+
+The rejected second experiment is preserved in
+[`experiments/snes-shared-obj.patch`](experiments/snes-shared-obj.patch) for
+reproduction in a disposable worktree. Apply it there and run:
+
+```sh
+cargo test --release -p snes-core --lib benchmark_shared_obj_screens -- --ignored --nocapture --test-threads=1
+```
+
+Native verification used a synthetic NES RGB24 ROM with `--no-audio`: rendered
+color, panel toggling, save/load HUD notifications, rendering after restore,
+and clean exit were observed.
+
+Final workspace tests: **1,677 passed, 0 failed, 16 ignored**. The ignored GPU
+readback test also passed when run explicitly. Workspace Clippy completed with
+warnings, including existing HUD float-literal warnings and chunk-iteration
+style suggestions in the new GPU tests. The release build also completed.

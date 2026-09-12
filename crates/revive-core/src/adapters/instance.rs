@@ -38,7 +38,7 @@ impl CoreInstance {
             None => detect_system(path)?,
         };
 
-        match system {
+        let mut core = match system {
             SystemKind::Nes => NesAdapter::load(path).map(Box::new).map(Self::Nes),
             SystemKind::Snes => SnesAdapter::load_with_audio(path, audio_enabled)
                 .map(|adapter| Self::Snes(Box::new(adapter))),
@@ -60,7 +60,18 @@ impl CoreInstance {
             }
             SystemKind::GameBoyAdvance => GameBoyAdvanceAdapter::load(path)
                 .map(|adapter| Self::GameBoyAdvance(Box::new(adapter))),
+        }?;
+        match &mut core {
+            Self::Nes(adapter) => adapter.set_audio_output_enabled(audio_enabled),
+            Self::Sg1000(adapter) => adapter.set_audio_output_enabled(audio_enabled),
+            Self::MasterSystem(adapter) => adapter.set_audio_output_enabled(audio_enabled),
+            Self::MegaDrive(adapter) => adapter.set_audio_output_enabled(audio_enabled),
+            Self::Pce(adapter) => adapter.set_audio_output_enabled(audio_enabled),
+            Self::GameBoy(adapter) => adapter.set_audio_output_enabled(audio_enabled),
+            Self::GameBoyAdvance(adapter) => adapter.set_audio_output_enabled(audio_enabled),
+            Self::Snes(_) => {} // configured during construction
         }
+        Ok(core)
     }
 
     pub fn system(&self) -> SystemKind {

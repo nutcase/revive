@@ -14,6 +14,7 @@ use crate::system::{
 pub struct PceAdapter {
     emulator: PceEmulator,
     rom_path: PathBuf,
+    audio_output_enabled: bool,
     title: String,
     hucard: bool,
     pad_state: u8,
@@ -47,6 +48,7 @@ impl PceAdapter {
         Ok(Self {
             emulator,
             rom_path: path.to_path_buf(),
+            audio_output_enabled: true,
             title: rom_stem(path),
             hucard,
             pad_state: 0xFF,
@@ -58,7 +60,14 @@ impl PceAdapter {
         &self.title
     }
 
+    pub fn set_audio_output_enabled(&mut self, enabled: bool) {
+        self.audio_output_enabled = enabled;
+        self.emulator.set_audio_output_enabled(enabled);
+    }
+
     pub fn step_frame(&mut self) -> Result<()> {
+        self.emulator
+            .set_audio_output_enabled(self.audio_output_enabled);
         const MAX_TICKS_PER_FRAME: usize = 150_000;
         for _ in 0..MAX_TICKS_PER_FRAME {
             self.emulator.tick();
@@ -261,6 +270,7 @@ mod tests {
         let mut adapter = PceAdapter {
             emulator,
             rom_path: PathBuf::from("dummy.pce"),
+            audio_output_enabled: true,
             title: "dummy".to_string(),
             hucard: true,
             pad_state: 0xFF,
