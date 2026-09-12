@@ -6,6 +6,18 @@ use crate::vdc::{
 
 use super::Bus;
 
+#[derive(Clone, Copy)]
+struct SpriteRenderOptions {
+    reverse_priority: bool,
+    no_sprite_line_limit: bool,
+    pattern_raw_index: bool,
+    row_interleaved: bool,
+    sprite_max_entries: usize,
+}
+
+#[cfg(test)]
+mod sprite_tests;
+
 impl Bus {
     pub(crate) fn render_frame_from_vram(&mut self) {
         let (display_height, y_offset) = self.compute_display_height();
@@ -429,6 +441,27 @@ impl Bus {
         line_display_starts: &[usize; FRAME_HEIGHT],
         line_display_widths: &[usize; FRAME_HEIGHT],
     ) {
+        self.render_sprites_with_options(
+            line_enabled,
+            line_display_starts,
+            line_display_widths,
+            SpriteRenderOptions {
+                reverse_priority: Self::env_sprite_reverse_priority(),
+                no_sprite_line_limit: Self::env_no_sprite_line_limit(),
+                pattern_raw_index: Self::env_sprite_pattern_raw_index(),
+                row_interleaved: Self::env_sprite_row_interleaved(),
+                sprite_max_entries: Self::env_sprite_max_entries().unwrap_or(SPRITE_COUNT),
+            },
+        );
+    }
+
+    fn render_sprites_with_options(
+        &mut self,
+        line_enabled: &[bool; FRAME_HEIGHT],
+        line_display_starts: &[usize; FRAME_HEIGHT],
+        line_display_widths: &[usize; FRAME_HEIGHT],
+        options: SpriteRenderOptions,
+    ) {
         if self.vdc.vram.is_empty() {
             return;
         }
@@ -458,11 +491,13 @@ impl Bus {
         let mwr = self.vdc.registers[0x09];
         let sprite_dot_period = (mwr >> 2) & 0x03;
         let cg_mode_enabled = sprite_dot_period == 0x01;
-        let reverse_priority = Self::env_sprite_reverse_priority();
-        let no_sprite_line_limit = Self::env_no_sprite_line_limit();
-        let pattern_raw_index = Self::env_sprite_pattern_raw_index();
-        let row_interleaved = Self::env_sprite_row_interleaved();
-        let sprite_max_entries = Self::env_sprite_max_entries().unwrap_or(SPRITE_COUNT);
+        let SpriteRenderOptions {
+            reverse_priority,
+            no_sprite_line_limit,
+            pattern_raw_index,
+            row_interleaved,
+            sprite_max_entries,
+        } = options;
 
         for dest_row in 0..FRAME_HEIGHT {
             if !line_enabled[dest_row] {
@@ -571,74 +606,89 @@ impl Bus {
             let line_display_start = line_display_starts[dest_row];
             let line_display_width = line_display_widths[dest_row];
             let line_display_end = line_display_start + line_display_width;
-            for screen_x in line_display_start..line_display_end {
-                let offset = dest_row * FRAME_WIDTH + screen_x;
-                for sprite in line_sprites[..line_sprite_count].iter() {
-                    if (screen_x as i32) < sprite.x
-                        || (screen_x as i32) >= sprite.x + sprite.visible_width as i32
-                    {
-                        continue;
-                    }
-
+            if line_sprite_count == 0 {
+                continue;
+            }
+            // Claim opaque OBJ pixels even when the background hides them:
+            // a later sprite must not show through the winning sprite.
+            let mut claimed = [false; FRAME_WIDTH];
+            for sprite in &line_sprites[..line_sprite_count] {
+                let start = sprite.x.max(line_display_start as i32) as usize;
+                let end = (sprite.x + sprite.visible_width as i32)
+                    .min(line_display_end as i32)
+                    .max(0) as usize;
+                let mut screen_x = start;
+                while screen_x < end {
                     let local_x = (screen_x as i32 - sprite.x) as usize;
                     let src_x = if sprite.h_flip {
                         sprite.full_width - 1 - local_x
                     } else {
                         local_x
                     };
-                    let src_tile_x = src_x / SPRITE_PATTERN_WIDTH;
-                    let col_in_tile = src_x % SPRITE_PATTERN_WIDTH;
-                    let pattern_index =
-                        sprite.pattern_base_index + sprite.src_tile_y * 2 + src_tile_x;
+                    let col = src_x % SPRITE_PATTERN_WIDTH;
+                    let span_len = if sprite.h_flip {
+                        col + 1
+                    } else {
+                        SPRITE_PATTERN_WIDTH - col
+                    };
+                    let span_end = end.min(screen_x + span_len);
+                    let pattern_index = sprite.pattern_base_index
+                        + sprite.src_tile_y * 2
+                        + src_x / SPRITE_PATTERN_WIDTH;
                     let pattern_base = (pattern_index * SPRITE_PATTERN_WORDS) & vram_mask;
-
-                    let (plane0_word, plane1_word, plane2_word, plane3_word) = if row_interleaved {
+                    // Each 16-pixel pattern row is fetched once, including
+                    // clipped and horizontally flipped portions of that row.
+                    let mut planes = if row_interleaved {
                         let row_base = (pattern_base + sprite.row_in_tile * 4) & vram_mask;
-                        (
+                        [
                             vram[row_base],
                             vram[(row_base + 1) & vram_mask],
                             vram[(row_base + 2) & vram_mask],
                             vram[(row_base + 3) & vram_mask],
-                        )
+                        ]
                     } else {
-                        (
+                        [
                             vram[(pattern_base + sprite.row_in_tile) & vram_mask],
                             vram[(pattern_base + 16 + sprite.row_in_tile) & vram_mask],
                             vram[(pattern_base + 32 + sprite.row_in_tile) & vram_mask],
                             vram[(pattern_base + 48 + sprite.row_in_tile) & vram_mask],
-                        )
+                        ]
                     };
-                    let shift = 15usize.saturating_sub(col_in_tile);
-                    let mut plane0 = ((plane0_word >> shift) & 0x01) as u8;
-                    let mut plane1 = ((plane1_word >> shift) & 0x01) as u8;
-                    let mut plane2 = ((plane2_word >> shift) & 0x01) as u8;
-                    let mut plane3 = ((plane3_word >> shift) & 0x01) as u8;
-
                     if cg_mode_enabled {
                         if sprite.use_upper_cg_pair {
-                            plane0 = plane2;
-                            plane1 = plane3;
-                            plane2 = 0;
-                            plane3 = 0;
-                        } else {
-                            plane2 = 0;
-                            plane3 = 0;
+                            planes[0] = planes[2];
+                            planes[1] = planes[3];
                         }
+                        planes[2] = 0;
+                        planes[3] = 0;
                     }
-
-                    let pixel = plane0 | (plane1 << 1) | (plane2 << 2) | (plane3 << 3);
-                    if pixel == 0 {
-                        continue;
+                    let first_x = screen_x;
+                    while screen_x < span_end {
+                        if !claimed[screen_x] {
+                            let delta = screen_x - first_x;
+                            let shift = if sprite.h_flip {
+                                15 - col + delta
+                            } else {
+                                15 - col - delta
+                            };
+                            let pixel = ((planes[0] >> shift) & 1)
+                                | (((planes[1] >> shift) & 1) << 1)
+                                | (((planes[2] >> shift) & 1) << 2)
+                                | (((planes[3] >> shift) & 1) << 3);
+                            if pixel != 0 {
+                                claimed[screen_x] = true;
+                                let offset = dest_row * FRAME_WIDTH + screen_x;
+                                if !self.bg_opaque[offset]
+                                    || (sprite.high_priority && !self.bg_priority[offset])
+                                {
+                                    self.framebuffer[offset] = self.vce.palette_rgb(
+                                        (sprite.palette_base | pixel as usize) & 0x1FF,
+                                    );
+                                }
+                            }
+                        }
+                        screen_x += 1;
                     }
-
-                    let bg_opaque = self.bg_opaque[offset];
-                    let bg_forces_front = self.bg_priority[offset];
-                    if !bg_opaque || (sprite.high_priority && !bg_forces_front) {
-                        let colour_index = (sprite.palette_base | pixel as usize) & 0x1FF;
-                        self.framebuffer[offset] = self.vce.palette_rgb(colour_index);
-                    }
-                    // The first opaque sprite pixel wins, regardless of BG blend result.
-                    break;
                 }
             }
         }
