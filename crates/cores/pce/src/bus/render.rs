@@ -16,6 +16,8 @@ struct SpriteRenderOptions {
 }
 
 #[cfg(test)]
+mod palette_tests;
+#[cfg(test)]
 mod sprite_tests;
 
 impl Bus {
