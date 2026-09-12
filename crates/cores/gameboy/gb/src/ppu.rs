@@ -33,7 +33,7 @@ pub struct GbPpu {
     frame_rgba8888: [u8; FRAMEBUFFER_SIZE],
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 struct SpriteCandidate {
     oam_index: usize,
     x: i32,
@@ -224,7 +224,7 @@ impl GbPpu {
         bg_priority: &[bool],
     ) {
         let sprite_height = if (lcdc & OBJ_SIZE_8X16) != 0 { 16 } else { 8 };
-        let mut visible = [None; 10];
+        let mut visible = [SpriteCandidate::default(); 10];
         let mut visible_count = 0usize;
 
         for sprite_index in 0..40usize {
@@ -239,118 +239,82 @@ impl GbPpu {
             }
 
             if visible_count < visible.len() {
-                visible[visible_count] = Some(SpriteCandidate {
+                visible[visible_count] = SpriteCandidate {
                     oam_index: sprite_index,
                     x,
                     y,
                     tile,
                     attrs,
-                });
+                };
                 visible_count += 1;
             } else {
                 break;
             }
         }
 
+        if visible_count == 0 {
+            return;
+        }
+        // Selection always uses OAM order, including horizontally offscreen
+        // objects. DMG then prefers lower X, with OAM order breaking ties;
+        // CGB keeps OAM priority regardless of X.
+        let visible = &mut visible[..visible_count];
+        if !cgb_mode {
+            visible.sort_unstable_by_key(|sprite| (sprite.x, sprite.oam_index));
+        }
         let obp0 = bus.ppu_obj_palette0();
         let obp1 = bus.ppu_obj_palette1();
-        let ly_usize = usize::from(ly);
-        for x in 0..GB_LCD_WIDTH as usize {
-            let mut winning: Option<(u8, u8)> = None;
-            let mut winning_x = i32::MAX;
-            let mut winning_oam = usize::MAX;
-            let x_i32 = x as i32;
-
-            for candidate in visible.iter().flatten() {
-                if x_i32 < candidate.x || x_i32 >= candidate.x + 8 {
+        let mut claimed = [false; GB_LCD_WIDTH as usize];
+        for sprite in visible {
+            let start = sprite.x.max(0) as usize;
+            let end = (sprite.x + 8).clamp(0, GB_LCD_WIDTH as i32) as usize;
+            if start >= end {
+                continue;
+            }
+            let mut row = i32::from(ly) - sprite.y;
+            if sprite.attrs & 0x40 != 0 {
+                row = sprite_height - 1 - row;
+            }
+            let tile = if sprite_height == 16 {
+                (sprite.tile & 0xFE).wrapping_add((row / 8) as u8)
+            } else {
+                sprite.tile
+            };
+            let address = 0x8000 + u16::from(tile) * 16 + (row % 8) as u16 * 2;
+            let bank = u8::from(cgb_mode && sprite.attrs & 0x08 != 0);
+            let low = bus.ppu_read_vram_bank(bank, address);
+            let high = bus.ppu_read_vram_bank(bank, address + 1);
+            for x in start..end {
+                if claimed[x] {
                     continue;
                 }
-                let Some(color_index) =
-                    self.sprite_color_index_at(bus, candidate, sprite_height, x_i32, ly, cgb_mode)
-                else {
-                    continue;
+                let local_x = (x as i32 - sprite.x) as u8;
+                let bit = if sprite.attrs & 0x20 != 0 {
+                    local_x
+                } else {
+                    7 - local_x
                 };
+                let color_index = (((high >> bit) & 1) << 1) | ((low >> bit) & 1);
                 if color_index == 0 {
                     continue;
                 }
-
-                let better = if cgb_mode {
-                    candidate.oam_index < winning_oam
-                } else {
-                    candidate.x < winning_x
-                        || (candidate.x == winning_x && candidate.oam_index < winning_oam)
-                };
-                if better {
-                    winning = Some((color_index, candidate.attrs));
-                    winning_x = candidate.x;
-                    winning_oam = candidate.oam_index;
+                // An opaque winning object blocks later objects even when BG
+                // priority hides it. Transparent pixels never claim ownership.
+                claimed[x] = true;
+                if bg_color_indices[x] != 0
+                    && ((cgb_mode && bg_priority[x]) || sprite.attrs & 0x80 != 0)
+                {
+                    continue;
                 }
-            }
-
-            let Some((color_index, attrs)) = winning else {
-                continue;
-            };
-            let obj_behind_bg = (attrs & 0x80) != 0;
-            if cgb_mode && bg_priority[x] && bg_color_indices[x] != 0 {
-                continue;
-            }
-            if obj_behind_bg && bg_color_indices[x] != 0 {
-                continue;
-            }
-
-            let color = if cgb_mode {
-                cgb_palette_color(bus, false, attrs & 0x07, color_index)
-            } else {
-                let palette = if (attrs & 0x10) != 0 { obp1 } else { obp0 };
-                dmg_palette_color(palette, color_index)
-            };
-            self.write_pixel_rgba(x, ly_usize, color);
-        }
-    }
-
-    fn sprite_color_index_at(
-        &self,
-        bus: &GbBus,
-        candidate: &SpriteCandidate,
-        sprite_height: i32,
-        x: i32,
-        ly: u8,
-        cgb_mode: bool,
-    ) -> Option<u8> {
-        let mut sprite_x = x - candidate.x;
-        let mut sprite_y = i32::from(ly) - candidate.y;
-        if !(0..8).contains(&sprite_x) || !(0..sprite_height).contains(&sprite_y) {
-            return None;
-        }
-
-        if (candidate.attrs & 0x20) != 0 {
-            sprite_x = 7 - sprite_x;
-        }
-        if (candidate.attrs & 0x40) != 0 {
-            sprite_y = (sprite_height - 1) - sprite_y;
-        }
-
-        let mut tile = candidate.tile;
-        if sprite_height == 16 {
-            tile &= 0xFE;
-            if sprite_y >= 8 {
-                tile = tile.wrapping_add(1);
-                sprite_y -= 8;
+                let color = if cgb_mode {
+                    cgb_palette_color(bus, false, sprite.attrs & 7, color_index)
+                } else {
+                    let palette = if sprite.attrs & 0x10 != 0 { obp1 } else { obp0 };
+                    dmg_palette_color(palette, color_index)
+                };
+                self.write_pixel_rgba(x, usize::from(ly), color);
             }
         }
-
-        let tile_addr = 0x8000 + u16::from(tile) * 16;
-        let line_offset = (sprite_y as u16) * 2;
-        let bank = if cgb_mode && (candidate.attrs & 0x08) != 0 {
-            1
-        } else {
-            0
-        };
-        let low = bus.ppu_read_vram_bank(bank, tile_addr + line_offset);
-        let high = bus.ppu_read_vram_bank(bank, tile_addr + line_offset + 1);
-        let bit = 7 - (sprite_x as u8);
-        let color = (((high >> bit) & 0x01) << 1) | ((low >> bit) & 0x01);
-        Some(color)
     }
 
     fn fetch_bg_window_pixel(
@@ -637,3 +601,6 @@ mod tests {
         assert_eq!(bus.ppu_stat() & 0x03, 0);
     }
 }
+
+#[cfg(test)]
+mod sprite_tests;
