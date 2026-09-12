@@ -356,3 +356,64 @@ cargo test -p pce-core --features runtime-debug-flags vce::tests::configured_pal
 Workspace validation: **1,682 passed, 0 failed, 19 ignored**. Targeted Clippy
 (`pce-core`, `revive-core`, `revive-cli`, all targets), release build, changed-file
 Rust formatting and whitespace checks pass. Existing Clippy/build warnings remain.
+
+## GB/GBC sprite span rendering
+
+Sprite rendering now visits only each selected object's clipped eight-pixel
+horizontal span, fetching the two pattern-row bytes once per object/scanline.
+Selection still takes the first ten vertically matching OAM entries, including
+horizontally offscreen objects. DMG orders these entries by X then OAM index;
+CGB retains OAM order. A stack-only occupancy mask records the first opaque
+winner before background priority is applied, so a background-hidden object
+still blocks later objects while transparent pixels remain unclaimed.
+
+8x8/8x16 tile addressing, flips, CGB VRAM banks/palettes and existing background
+priority behavior are preserved. No public API, timing state or save-state
+layout changes; all temporary sprite data is local to a scanline.
+
+The old sprite and complete scanline renderers are retained only in tests.
+Differential tests cover 32 model/size/scene configurations over all 144 visible
+rows, comparing sprite-only and complete BG/window/OBJ pixels and serialized
+PPU state. Coverage includes overlap, transparency, left/right clipping, empty
+lines, offscreen objects, changing OAM/VRAM/palettes/scroll between rows and state
+restoration. Explicit regressions distinguish DMG X priority from CGB OAM
+priority, equal-X ties, background-hidden winners and offscreen objects consuming
+the ten-object limit.
+
+### Measurements
+
+Apple M2, release profile, original/optimized renderers in the same binary with
+identical opaque inputs. Three sequential runs after compilation; each uses two
+warm-up pairs and six measured pairs, alternating order. Each batch renders 100
+sets of 144 scanlines. Values below are medians of the three per-run batch
+medians, in microseconds per 144-line set. Both paths' serialized PPU states
+(including all framebuffer bytes) match after every benchmark case.
+
+| Model / workload | Sprite pass before | Sprite pass after | Reduction | Complete rendering before | Complete rendering after | Reduction |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| GB / spread | 257.797 | 22.385 | 91.3% | 390.794 | 154.952 | 60.3% |
+| GB / overlap | 191.023 | 6.796 | 96.4% | 319.181 | 131.877 | 58.7% |
+| GB / offscreen | 181.458 | 4.739 | 97.4% | 316.460 | 135.167 | 57.3% |
+| GB / transparent | 235.533 | 15.061 | 93.6% | 361.490 | 141.909 | 60.7% |
+| GB / empty | 174.074 | 4.754 | 97.3% | 299.565 | 129.868 | 56.6% |
+| GBC / spread | 258.382 | 20.893 | 91.9% | 473.341 | 242.362 | 48.8% |
+| GBC / overlap | 192.059 | 6.780 | 96.5% | 420.685 | 231.098 | 45.1% |
+| GBC / offscreen | 187.564 | 4.678 | 97.5% | 415.119 | 229.901 | 44.6% |
+| GBC / transparent | 236.681 | 12.670 | 94.6% | 440.241 | 237.272 | 46.1% |
+| GBC / empty | 173.719 | 4.630 | 97.3% | 398.464 | 228.072 | 42.8% |
+
+Complete rendering includes background, window and sprites, but excludes CPU
+emulation, PPU timing dispatch, audio and presentation. These synthetic results
+are not whole-game FPS measurements. In particular, large empty/offscreen gains
+reflect removal of the old pixel-first search even when no object could draw.
+
+```sh
+cargo test -p emulator-gb
+cargo test --release -p emulator-gb benchmark_gb_sprite_spans -- --ignored --nocapture --test-threads=1
+```
+
+Workspace tests: **1,685 passed, 0 failed, 20 ignored**. After a test-fixture
+iteration-style cleanup, the focused GB suite passed again (52 passed, 2 ignored)
+and GB Clippy passed. Targeted Clippy for `emulator-gb`, `revive-core` and
+`revive-cli`, the release build, changed-file formatting and whitespace checks
+completed. Existing framebuffer chunk-iteration and frontend warnings remain.
