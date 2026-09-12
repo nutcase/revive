@@ -165,52 +165,59 @@ impl Vce {
         cpu_master_cycles.div_ceil(dot_divider).max(1)
     }
 
-    #[inline]
-    fn brightness_override() -> Option<u8> {
-        #[cfg(not(feature = "runtime-debug-flags"))]
-        {
-            None
-        }
-
-        #[cfg(feature = "runtime-debug-flags")]
-        {
-            use std::sync::OnceLock;
-            static OVERRIDE: OnceLock<Option<u8>> = OnceLock::new();
-            *OVERRIDE.get_or_init(|| {
-                std::env::var("PCE_FORCE_BRIGHTNESS")
-                    .ok()
-                    .and_then(|s| u8::from_str_radix(&s, 16).ok())
-                    .map(|v| v & 0x0F)
-            })
-        }
-    }
-
     pub(crate) fn palette_word(&self, index: usize) -> u16 {
         self.palette.get(index).copied().unwrap_or(0)
     }
 
     pub(crate) fn palette_rgb(&self, index: usize) -> u32 {
         let raw = self.palette.get(index).copied().unwrap_or(0);
-        // HuC6260 palette words are 9-bit RGB (3 bits/channel).
-        let blue = (raw & 0x0007) as u8;
-        let red = ((raw >> 3) & 0x0007) as u8;
-        let green = ((raw >> 6) & 0x0007) as u8;
-
-        let scale = Self::brightness_override()
-            .map(|v| v as u16)
-            .unwrap_or(0x07);
-        let component = |value: u8| -> u8 {
-            if scale == 0 {
-                return 0;
-            }
-            let expanded = (value as u16 * 255) / 0x07;
-            let scaled = (expanded * scale) / 0x07;
-            scaled.min(255) as u8
-        };
-
-        let r = component(red);
-        let g = component(green);
-        let b = component(blue);
-        ((r as u32) << 16) | ((g as u32) << 8) | b as u32
+        rgb_table()[(raw & 0x01FF) as usize]
     }
 }
+
+// Key by the actual 9-bit color, not palette index: direct palette writes,
+// DMA, reset and decoded states automatically use the correct conversion.
+const fn make_rgb_table(scale: u16) -> [u32; 512] {
+    let mut table = [0; 512];
+    let mut raw = 0;
+    while raw < table.len() {
+        let blue = expand_component((raw & 7) as u16, scale);
+        let red = expand_component(((raw >> 3) & 7) as u16, scale);
+        let green = expand_component(((raw >> 6) & 7) as u16, scale);
+        table[raw] = (red << 16) | (green << 8) | blue;
+        raw += 1;
+    }
+    table
+}
+
+const fn expand_component(value: u16, scale: u16) -> u32 {
+    // Preserve both truncating divisions and saturation of the original path.
+    let scaled = ((value * 255) / 7 * scale) / 7;
+    if scaled > 255 { 255 } else { scaled as u32 }
+}
+
+#[inline]
+fn rgb_table() -> &'static [u32; 512] {
+    #[cfg(not(feature = "runtime-debug-flags"))]
+    {
+        static TABLE: [u32; 512] = make_rgb_table(7);
+        &TABLE
+    }
+    #[cfg(feature = "runtime-debug-flags")]
+    {
+        use std::sync::OnceLock;
+        static TABLE: OnceLock<[u32; 512]> = OnceLock::new();
+        TABLE.get_or_init(|| {
+            // As before, read the optional override once, on first color use.
+            let scale = std::env::var("PCE_FORCE_BRIGHTNESS")
+                .ok()
+                .and_then(|s| u8::from_str_radix(&s, 16).ok())
+                .map(|v| v & 0x0F)
+                .unwrap_or(7);
+            make_rgb_table(u16::from(scale))
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests;

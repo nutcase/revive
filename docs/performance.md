@@ -300,3 +300,59 @@ Validation: `cargo test --workspace --no-fail-fast` passed with **1,679 passed,
 0 failed, 17 ignored**. Targeted Clippy (`pce-core`, `revive-core`, `revive-cli`,
 all targets) and `cargo build --release` completed with existing warnings.
 Formatting checks for changed Rust files and whitespace checks pass.
+
+## PCE palette RGB lookup
+
+`Vce::palette_rgb` now indexes a 512-entry RGB table with the current palette
+word's low nine bits. The default table is computed at compile time and uses
+2 KiB shared across VCE instances. With `runtime-debug-flags`, the table is
+initialized once using `PCE_FORCE_BRIGHTNESS`, retaining the previous first-use,
+process-wide setting and parsing behavior. Both truncating divisions and channel
+saturation remain identical to the former arithmetic.
+
+The key is the color value itself, so byte writes, CRAM DMA, direct debug writes,
+reset and restored palette values need no cache invalidation. No VCE fields or
+serialized bytes change. Regression tests compare all 65,536 raw words against
+the original arithmetic at all 16 brightness levels, check intermediate byte
+writes and address wrapping, and round-trip the pre-change serialized layout.
+Separate processes also verify the feature-enabled lookup at all brightness
+levels, with an unset override, masked `FF`, and invalid input.
+
+### Measurements
+
+Apple M2, release profile. The isolated lookup benchmark measures 122,880 color
+reads/output stores, with both paths in one binary, alternating order, two
+warm-up batches and six measured batches of 100 iterations. The median was
+**155.752 µs → 76.822 µs (50.7% less)**.
+
+Rendering measurements use two standalone copies of the PCE crate with identical
+fixtures, dependencies and release settings (`opt-level=3`, thin LTO, one codegen
+unit). The reference uses `vce.rs` from `2d7e09f`; the optimized copy uses the RGB
+lookup. The additional VCE unit-test module is omitted from the optimized copy
+to retain the same test inventory in both binaries. Both builds finish before
+measurement, and before/after run order alternates across three pairs. Each
+workload warms up for 30 calls and times 300 calls to `render_frame_from_vram`.
+The table reports medians of the three per-run means and p95s, in microseconds.
+
+| Synthetic 256-pixel-wide rendering workload | Mean before | Mean after | Reduction | p95 before | p95 after |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Background only | 255.519 | 203.812 | 20.2% | 297.208 | 248.500 |
+| Background and sprites | 427.318 | 380.009 | 11.1% | 503.750 | 436.875 |
+| Background/sprites, 64 palette entries updated per call | 445.549 | 375.950 | 15.6% | 501.666 | 437.667 |
+
+Final serialized-bus checksums (including the framebuffer) agree in all runs:
+`6EE4A0FA`, `E3CCBE58`, and `CB2FADCF`, respectively. Palette-animation writes are
+inside the timed interval; fixture allocation and checksumming are outside.
+These measure CPU rendering, not CPU emulation, audio, presentation or game FPS.
+Absolute times and gains vary with workload and machine.
+
+```sh
+cargo test -p pce-core
+cargo test --release -p pce-core benchmark_pce_palette_lookup -- --ignored --nocapture --test-threads=1
+cargo test --release -p pce-core benchmark_pce_palette_frame_rendering -- --ignored --nocapture --test-threads=1
+cargo test -p pce-core --features runtime-debug-flags vce::tests::configured_palette_lookup_matches_reference
+```
+
+Workspace validation: **1,682 passed, 0 failed, 19 ignored**. Targeted Clippy
+(`pce-core`, `revive-core`, `revive-cli`, all targets), release build, changed-file
+Rust formatting and whitespace checks pass. Existing Clippy/build warnings remain.
