@@ -416,7 +416,9 @@ fn sg1000_button(button: VirtualButton) -> Option<SgButton> {
         | VirtualButton::Select
         | VirtualButton::C
         | VirtualButton::Z
-        | VirtualButton::Mode => None,
+        | VirtualButton::Mode
+        | VirtualButton::L2
+        | VirtualButton::R2 => None,
     }
 }
 
@@ -436,6 +438,8 @@ fn mastersystem_button(button: VirtualButton) -> Option<SmsButton> {
         | VirtualButton::Select
         | VirtualButton::C
         | VirtualButton::Z
-        | VirtualButton::Mode => None,
+        | VirtualButton::Mode
+        | VirtualButton::L2
+        | VirtualButton::R2 => None,
     }
 }

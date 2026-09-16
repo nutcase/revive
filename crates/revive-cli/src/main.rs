@@ -125,10 +125,10 @@ where
 fn print_usage() {
     println!("Usage:");
     println!(
-        "  revive [rom] [--system nes|snes|sg1000|sms|megadrive|pce|gb|gbc|gba] [--cheats file.json] [--no-audio]"
+        "  revive [rom] [--system nes|snes|sg1000|sms|megadrive|pce|gb|gbc|gba|ps1] [--cheats file.json] [--no-audio]"
     );
     println!(
-        "  revive run [rom] [--system nes|snes|sg1000|sms|megadrive|pce|gb|gbc|gba] [--cheats file.json] [--no-audio]"
+        "  revive run [rom] [--system nes|snes|sg1000|sms|megadrive|pce|gb|gbc|gba|ps1] [--cheats file.json] [--no-audio]"
     );
     println!("  revive --select");
     println!();
@@ -166,6 +166,10 @@ fn select_rom_path() -> Option<PathBuf> {
             SystemKind::MegaDrive.dialog_extensions(),
         )
         .add_filter(SystemKind::Pce.label(), SystemKind::Pce.dialog_extensions())
+        .add_filter(
+            SystemKind::PlayStation.label(),
+            SystemKind::PlayStation.dialog_extensions(),
+        )
         .add_filter("Game Boy", &["gb", "gbc"])
         .add_filter(
             SystemKind::GameBoyAdvance.label(),
@@ -220,6 +224,9 @@ fn run_sdl_loop(
         frame_height,
         PANEL_WIDTH_DEFAULT as u32,
     )?;
+    if core.system() == SystemKind::PlayStation {
+        render_state.set_display_aspect((4, 3));
+    }
     render_state.resize_window_for_panel(&mut window, false);
 
     let audio_output = if options.no_audio {
@@ -230,7 +237,7 @@ fn run_sdl_loop(
     let audio_output = audio_output;
     let mut audio_scratch = Vec::new();
     let mut event_pump = sdl.event_pump().map_err(sdl_error)?;
-    let mut frame_clock = FrameClock::new(core.system());
+    let mut frame_clock = FrameClock::with_rate(core.frame_rate_hz());
     let mut input_state = InputState::default();
     let mut cheat_panel = CheatPanel::new();
     let mut hud_toast = HudToast::default();

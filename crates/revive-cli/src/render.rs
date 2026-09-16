@@ -28,6 +28,7 @@ pub(crate) struct RenderState {
     game_w: u32,
     game_h: u32,
     panel_width_px: u32,
+    fixed_aspect: bool,
 }
 
 impl RenderState {
@@ -88,7 +89,14 @@ impl RenderState {
             game_w,
             game_h,
             panel_width_px,
+            fixed_aspect: false,
         })
+    }
+
+    pub(crate) fn set_display_aspect(&mut self, aspect: (u32, u32)) {
+        self.fixed_aspect = true;
+        self.game_w = self.game_h * aspect.0 / aspect.1;
+        self.game_renderer.set_display_aspect(aspect);
     }
 
     pub(crate) fn panel_width_px(&self) -> u32 {
@@ -121,9 +129,13 @@ impl RenderState {
         let frame = core.frame();
         if (frame.width, frame.height) != self.texture_size {
             self.texture_size = (frame.width, frame.height);
-            self.game_w = frame.width as u32 * DEFAULT_SCALE;
-            self.game_h = frame.height as u32 * DEFAULT_SCALE;
-            self.resize_window_for_panel(window, panel_visible);
+            // PS1 can change horizontal resolution or interlace mid-game
+            // while the display remains 4:3. Keep the user's window stable.
+            if !self.fixed_aspect {
+                self.game_w = frame.width as u32 * DEFAULT_SCALE;
+                self.game_h = frame.height as u32 * DEFAULT_SCALE;
+                self.resize_window_for_panel(window, panel_visible);
+            }
         }
         self.game_renderer.upload_frame(
             &self.device,

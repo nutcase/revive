@@ -66,6 +66,7 @@ pub(crate) struct WgpuGameRenderer {
     texture_size: (usize, usize),
     texture_format: wgpu::TextureFormat,
     rgb_pipeline: wgpu::RenderPipeline,
+    display_aspect: Option<(u32, u32)>,
 }
 
 impl WgpuGameRenderer {
@@ -168,7 +169,12 @@ impl WgpuGameRenderer {
             texture_size: (0, 0),
             texture_format: wgpu::TextureFormat::Rgba8UnormSrgb,
             rgb_pipeline,
+            display_aspect: None,
         }
+    }
+
+    pub(crate) fn set_display_aspect(&mut self, aspect: (u32, u32)) {
+        self.display_aspect = Some(aspect);
     }
 
     pub(crate) fn upload_frame(
@@ -234,12 +240,15 @@ impl WgpuGameRenderer {
             return;
         }
 
+        let (display_width, display_height) = self
+            .display_aspect
+            .unwrap_or((self.texture_size.0 as u32, self.texture_size.1 as u32));
         let vertices = fitted_vertices(
             game_width,
             target_height,
             target_width,
-            self.texture_size.0 as u32,
-            self.texture_size.1 as u32,
+            display_width,
+            display_height,
         );
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
 

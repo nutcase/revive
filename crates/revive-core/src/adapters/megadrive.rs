@@ -150,7 +150,11 @@ fn md_button(button: VirtualButton) -> Option<MdButton> {
         VirtualButton::Y => Some(MdButton::Y),
         VirtualButton::Z => Some(MdButton::Z),
         VirtualButton::Mode => Some(MdButton::Mode),
-        VirtualButton::L | VirtualButton::R | VirtualButton::Select => None,
+        VirtualButton::L
+        | VirtualButton::R
+        | VirtualButton::Select
+        | VirtualButton::L2
+        | VirtualButton::R2 => None,
     }
 }
 fn md_display_title(emulator: &megadrive_core::Emulator, path: &Path) -> String {

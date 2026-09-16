@@ -14,6 +14,7 @@ Vendored core crates:
 - `crates/cores/mastersystem` → `mastersystem-core`
 - `crates/cores/megadrive` → `megadrive-core`
 - `crates/cores/pce` → `pce-core` (imported as `pce`)
+- `crates/cores/ps1` → `ps1-core` (vendored PCSX ReARMed C core, HLE BIOS, built with GNU make)
 - `crates/cores/gameboy/core` → `emulator-core`
 - `crates/cores/gameboy/gb` → `emulator-gb`
 - `crates/cores/gameboy/gba` → `emulator-gba`
@@ -62,6 +63,8 @@ Workspace layout, default binary is `revive-cli`:
 - **Master System**: implemented as a separate `mastersystem-core` crate, not as a Mega Drive mode. It shares the Z80/SN76489 family shape with SG-1000, but has its own SMS Mode 4 VDP path, CRAM, 8 KiB mirrored work RAM, standard 16 KiB bank mapper, and `.sms`/`.mk3` detection.
 - **Mega Drive**: both pads default to 6-button. `step_frame` loops `step()` until `frame_ready`.
 - **PC Engine**: joypad is an active-low byte (`pad_state` starts at `0xFF`). HuCard ROMs (`.pce`) load backup RAM (`.sav`) and BRAM (`.brm`) siblings to the ROM on boot; raw binaries are loaded at `$C000`. `flush_persistent_save` only writes if `hucard`.
+
+- **PlayStation**: `Ps1Adapter` hosts the statically linked PCSX ReARMed libretro core with HLE forced and no firmware directory. Native globals require one thread-confined instance per process. CUE/BIN or a ZIP containing one CUE and its tracks loads through `ps1_disc`; the owned temporary extraction survives until native handles close. Card 1 is saved atomically in `states/ps1/<original-stem>/memory-card.mcd` every 60 frames when changed. State slots use `.psst`. The core supplies the active NTSC/PAL frame rate, 44.1 kHz stereo, and RGBA frames; presentation stays 4:3 across resolution changes. No CHD, disc swapping, or analog pad in this initial integration. Read `crates/cores/ps1/UPSTREAM.md` before changing the vendored build or distributing binaries.
 
 ### State and save files
 
