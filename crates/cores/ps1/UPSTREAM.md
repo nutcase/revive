@@ -18,6 +18,9 @@ Local upstream changes:
   trace its own macOS process.
 - `Makefile`: pin the generated revision string to `8625c39-revive` instead of
   accidentally identifying the parent Revive repository as the upstream core.
+- `libpcsxcore/sio.c`: explicitly zero-initialize the memory-card buffers so
+  Mach-O emits defined zero-fill storage instead of common symbols whose sizes
+  cause the linker to infer an excessive 32 KiB alignment on macOS.
 
 Build choices:
 

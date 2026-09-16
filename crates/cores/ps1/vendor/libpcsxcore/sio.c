@@ -88,7 +88,10 @@ static unsigned int mcdst, rdwr;
 static unsigned char adrH, adrL;
 static unsigned int padst;
 
-char Mcd1Data[MCD_SIZE], Mcd2Data[MCD_SIZE];
+/* Explicit definitions avoid Mach-O common-symbol alignment inferred from
+ * these 128 KiB buffers. Their initial contents remain zero-filled. */
+char Mcd1Data[MCD_SIZE] = { 0 };
+char Mcd2Data[MCD_SIZE] = { 0 };
 
 unsigned char McdDisable[2];
 unsigned char McdFlag[2];
