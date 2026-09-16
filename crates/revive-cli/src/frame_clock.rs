@@ -1,17 +1,15 @@
 use std::time::{Duration, Instant};
 
-use revive_core::SystemKind;
-
 pub(crate) struct FrameClock {
     last_frame: Instant,
     frame_duration: Duration,
 }
 
 impl FrameClock {
-    pub(crate) fn new(system: SystemKind) -> Self {
+    pub(crate) fn with_rate(hz: f64) -> Self {
         Self {
             last_frame: Instant::now(),
-            frame_duration: Duration::from_secs_f64(1.0 / system.frame_rate_hz()),
+            frame_duration: Duration::from_secs_f64(1.0 / hz),
         }
     }
 

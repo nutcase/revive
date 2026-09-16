@@ -1,7 +1,7 @@
 use revive_core::{CoreInstance, SystemKind, VirtualButton};
 use sdl3::keyboard::{KeyboardState, Keycode, Scancode};
 
-const INPUT_BUTTONS: [VirtualButton; 15] = [
+const INPUT_BUTTONS: [VirtualButton; 17] = [
     VirtualButton::Up,
     VirtualButton::Down,
     VirtualButton::Left,
@@ -17,6 +17,8 @@ const INPUT_BUTTONS: [VirtualButton; 15] = [
     VirtualButton::C,
     VirtualButton::Z,
     VirtualButton::Mode,
+    VirtualButton::L2,
+    VirtualButton::R2,
 ];
 
 #[derive(Debug, Default)]
@@ -86,6 +88,7 @@ struct ButtonBinding {
 
 fn bindings_for_system(system: SystemKind) -> &'static [ButtonBinding] {
     match system {
+        SystemKind::PlayStation => &PS1_BINDINGS,
         SystemKind::Nes => &NES_BINDINGS,
         SystemKind::Snes => &SNES_BINDINGS,
         SystemKind::Sg1000 | SystemKind::MasterSystem => &SEGA_8_BIT_BINDINGS,
@@ -294,6 +297,8 @@ fn button_index(button: VirtualButton) -> usize {
         VirtualButton::C => 12,
         VirtualButton::Z => 13,
         VirtualButton::Mode => 14,
+        VirtualButton::L2 => 15,
+        VirtualButton::R2 => 16,
     }
 }
 
@@ -314,8 +319,36 @@ pub(crate) fn button_label(button: VirtualButton) -> &'static str {
         VirtualButton::C => "C",
         VirtualButton::Z => "Z",
         VirtualButton::Mode => "Mode",
+        VirtualButton::L2 => "L2",
+        VirtualButton::R2 => "R2",
     }
 }
+
+// Face buttons follow physical positions: Z=Cross, X=Circle, A=Square, S=Triangle.
+static PS1_BINDINGS: [ButtonBinding; 14] = [
+    binding(VirtualButton::Up, &[Keycode::Up], &[Scancode::Up]),
+    binding(VirtualButton::Down, &[Keycode::Down], &[Scancode::Down]),
+    binding(VirtualButton::Left, &[Keycode::Left], &[Scancode::Left]),
+    binding(VirtualButton::Right, &[Keycode::Right], &[Scancode::Right]),
+    binding(VirtualButton::B, &[Keycode::Z], &[Scancode::Z]),
+    binding(VirtualButton::A, &[Keycode::X], &[Scancode::X]),
+    binding(VirtualButton::Y, &[Keycode::A], &[Scancode::A]),
+    binding(VirtualButton::X, &[Keycode::S], &[Scancode::S]),
+    binding(VirtualButton::L, &[Keycode::Q], &[Scancode::Q]),
+    binding(VirtualButton::R, &[Keycode::W], &[Scancode::W]),
+    binding(VirtualButton::L2, &[Keycode::E], &[Scancode::E]),
+    binding(VirtualButton::R2, &[Keycode::R], &[Scancode::R]),
+    binding(
+        VirtualButton::Start,
+        &[Keycode::Return, Keycode::Space],
+        &[Scancode::Return, Scancode::Space],
+    ),
+    binding(
+        VirtualButton::Select,
+        &[Keycode::Backspace, Keycode::RShift, Keycode::LShift],
+        &[Scancode::Backspace, Scancode::RShift, Scancode::LShift],
+    ),
+];
 
 #[cfg(test)]
 mod tests {
@@ -338,8 +371,30 @@ mod tests {
     }
 
     #[test]
+    fn playstation_keys_include_face_buttons_and_both_shoulders() {
+        for (key, button) in [
+            (Keycode::Z, VirtualButton::B),
+            (Keycode::X, VirtualButton::A),
+            (Keycode::A, VirtualButton::Y),
+            (Keycode::S, VirtualButton::X),
+            (Keycode::Q, VirtualButton::L),
+            (Keycode::W, VirtualButton::R),
+            (Keycode::E, VirtualButton::L2),
+            (Keycode::R, VirtualButton::R2),
+        ] {
+            assert_eq!(keycode_button(SystemKind::PlayStation, key), Some(button));
+        }
+        let mut state = InputState::default();
+        state.set(VirtualButton::L2, true);
+        state.set(VirtualButton::R2, true);
+        state.clear();
+        assert!(!state.is_pressed(VirtualButton::L2) && !state.is_pressed(VirtualButton::R2));
+    }
+
+    #[test]
     fn every_keycode_binding_has_scancode_coverage() {
         for system in [
+            SystemKind::PlayStation,
             SystemKind::Nes,
             SystemKind::Snes,
             SystemKind::Sg1000,

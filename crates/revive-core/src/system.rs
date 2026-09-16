@@ -13,6 +13,7 @@ pub enum SystemKind {
     GameBoy,
     GameBoyColor,
     GameBoyAdvance,
+    PlayStation,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -116,7 +117,17 @@ const GAME_BOY_ADVANCE_INFO: SystemInfo = SystemInfo {
     frame_rate_hz: 59.7275,
 };
 
-pub const ALL_SYSTEMS: [SystemKind; 9] = [
+const PLAYSTATION_INFO: SystemInfo = SystemInfo {
+    kind: SystemKind::PlayStation,
+    label: "PlayStation",
+    storage_dir: "ps1",
+    state_extension: "psst",
+    rom_extensions: &["cue"],
+    dialog_extensions: &["cue", "zip", "bin"],
+    frame_rate_hz: 60.0, // Nominal; the active core supplies the actual NTSC/PAL rate.
+};
+
+pub const ALL_SYSTEMS: [SystemKind; 10] = [
     SystemKind::Nes,
     SystemKind::Snes,
     SystemKind::Sg1000,
@@ -126,17 +137,19 @@ pub const ALL_SYSTEMS: [SystemKind; 9] = [
     SystemKind::GameBoy,
     SystemKind::GameBoyColor,
     SystemKind::GameBoyAdvance,
+    SystemKind::PlayStation,
 ];
 
 pub const ROM_EXTENSIONS: &[&str] = &[
     "nes", "sfc", "smc", "sg", "sg1000", "sms", "mk3", "md", "gen", "genesis", "pce", "gb", "gbc",
-    "gba", "bin",
+    "gba", "bin", "cue", "zip",
 ];
 
 impl SystemKind {
     pub fn parse(input: &str) -> Option<Self> {
         match input.trim().to_ascii_lowercase().as_str() {
             "auto" => None,
+            "ps1" | "psx" | "playstation" => Some(Self::PlayStation),
             "nes" | "fc" | "famicom" => Some(Self::Nes),
             "snes" | "sfc" | "super-famicom" | "superfamicom" => Some(Self::Snes),
             "sg1000" | "sg-1000" | "sega-sg1000" => Some(Self::Sg1000),
@@ -166,6 +179,7 @@ impl SystemKind {
             Self::GameBoy => &GAME_BOY_INFO,
             Self::GameBoyColor => &GAME_BOY_COLOR_INFO,
             Self::GameBoyAdvance => &GAME_BOY_ADVANCE_INFO,
+            Self::PlayStation => &PLAYSTATION_INFO,
         }
     }
 
@@ -215,6 +229,8 @@ pub enum VirtualButton {
     C,
     Z,
     Mode,
+    L2,
+    R2,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -260,6 +276,14 @@ pub fn detect_system(path: &Path) -> Result<SystemKind> {
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
+
+    if ext == "zip" {
+        return if crate::ps1_disc::zip_has_cue(path)? {
+            Ok(SystemKind::PlayStation)
+        } else {
+            Err("ZIP does not contain a PS1 CUE; extract other ROM archives first".into())
+        };
+    }
 
     if ext == "bin" {
         let data = std::fs::read(path).map_err(|err| err.to_string())?;
@@ -338,6 +362,20 @@ mod tests {
             detect_system(Path::new("game.gba")).unwrap(),
             SystemKind::GameBoyAdvance
         );
+    }
+
+    #[test]
+    fn playstation_aliases_and_disc_metadata() {
+        for alias in ["ps1", "PSX", "playstation"] {
+            assert_eq!(SystemKind::parse(alias), Some(SystemKind::PlayStation));
+        }
+        assert_eq!(
+            detect_system(Path::new("game.CUE")).unwrap(),
+            SystemKind::PlayStation
+        );
+        assert_eq!(SystemKind::PlayStation.storage_dir(), "ps1");
+        assert_eq!(SystemKind::PlayStation.state_extension(), "psst");
+        assert!(SystemKind::PlayStation.dialog_extensions().contains(&"zip"));
     }
 
     #[test]

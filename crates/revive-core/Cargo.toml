@@ -24,3 +24,7 @@ nes-emulator = { path = "../cores/nes" }
 pce = { package = "pce-core", path = "../cores/pce" }
 sg1000-core = { path = "../cores/sg1000" }
 snes-core = { path = "../cores/snes" }
+
+ps1-core = { path = "../cores/ps1" }
+tempfile = "3"
+zip = { version = "2", default-features = false, features = ["deflate"] }

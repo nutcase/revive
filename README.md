@@ -1,6 +1,6 @@
 # Revive
 
-Revive is a Rust emulator development workspace and integrated SDL2/OpenGL/egui
+Revive is a Rust emulator development workspace and integrated SDL3/wgpu/egui
 frontend for several vendored emulator cores. It is built for working on classic
 console emulation, save states, memory maps, controller input, audio/video
 timing, cheat search, and frontend integration in one local repository.
@@ -11,8 +11,8 @@ differences between the underlying emulator cores.
 
 The repository is useful for people searching for Rust emulator projects,
 multi-system emulator frontends, NES/SNES/Game Boy/GBA emulator development,
-Sega 8-bit and Mega Drive emulation, PC Engine emulation, SDL2 emulators,
-OpenGL frame presentation, egui tooling, save-state serialization, cartridge
+Sega 8-bit and Mega Drive emulation, PC Engine emulation, SDL3 emulators,
+wgpu frame presentation, egui tooling, save-state serialization, cartridge
 mappers, PPU/video timing, APU/audio timing, and cheat or RAM search tools.
 
 ## Supported Systems
@@ -28,6 +28,7 @@ mappers, PPU/video timing, APU/audio timing, and cheat or RAM search tools.
 | Game Boy | `gb`, `gameboy`, `game-boy` | `.gb` |
 | Game Boy Color | `gbc`, `gameboycolor`, `game-boy-color`, `gameboy-color` | `.gbc` |
 | Game Boy Advance | `gba`, `gameboyadvance`, `game-boy-advance`, `gameboy-advance` | `.gba` |
+| PlayStation | `ps1`, `psx`, `playstation` | `.cue`, `.zip` containing one CUE and its tracks; raw `.bin` requires `--system ps1` |
 
 ## Emulator Development
 
@@ -40,7 +41,7 @@ Good entry points:
 - Emulator cores: `crates/cores/*`
 - System adapters and common runtime API: `crates/revive-core`
 - Cheat search and memory editing model: `crates/revive-cheat`
-- SDL2/OpenGL/egui frontend loop: `crates/revive-cli`
+- SDL3/wgpu/egui frontend loop: `crates/revive-cli`
 - Save-state examples: `crates/cores/gameboy/gb/src/state.rs` and `crates/cores/gameboy/gba/src/state.rs`
 - Input, frame, audio, memory, save-state, and persistent-save integration:
   `crates/revive-core/src/adapters/`
@@ -62,6 +63,7 @@ crates/cores/sg1000
 crates/cores/mastersystem
 crates/cores/megadrive
 crates/cores/pce
+crates/cores/ps1
 crates/cores/gameboy/core
 crates/cores/gameboy/gb
 crates/cores/gameboy/gba
@@ -71,17 +73,18 @@ Revive-specific crates are split by responsibility.
 
 - `crates/revive-core`: system detection, emulator adapters, and the common runtime API
 - `crates/revive-cheat`: UI-independent cheat search, cheat definitions, and JSON persistence
-- `crates/revive-cli`: SDL2 + OpenGL + egui frontend
+- `crates/revive-cli`: SDL3 + wgpu + egui frontend
 
 ## Requirements
 
 - Rust toolchain
 - C/C++ toolchain
 - CMake
+- GNU make (for the vendored PS1 C core)
 - Apple Silicon native builds are recommended on macOS
 
-SDL2 is built through the `sdl2` crate's `bundled` / `static-link` features, so
-a system SDL2 installation is usually not required.
+SDL3 is built through the `sdl3` crate's `build-from-source-static` feature, so
+a system SDL3 installation is not required.
 
 ## Running
 
@@ -105,6 +108,7 @@ cargo run -- run <rom> --system pce
 cargo run -- run <rom> --system gb
 cargo run -- run <rom> --system gbc
 cargo run -- run <rom> --system gba
+cargo run -- run <disc.cue> --system ps1
 ```
 
 To run without audio:
@@ -420,7 +424,7 @@ resolved by the `revive-core` adapter for the active system.
 
 ### `revive-cli`
 
-`revive-cli` is the SDL2 + OpenGL + egui frontend.
+`revive-cli` is the SDL3 + wgpu + egui frontend.
 
 Main flow:
 
@@ -430,7 +434,7 @@ Main flow:
 4. In the event loop, process input, save states, and cheat panel actions.
 5. Each frame, run `apply_cheats -> step_frame -> apply_cheats`.
 6. Feed samples into the audio queue.
-7. Upload the RGB24 frame to an OpenGL texture.
+7. Upload the frame using its RGB24/RGBA/BGRA format to a wgpu texture.
 8. Draw the egui cheat panel on the right side.
 
 When the panel is open, the viewport reserves the panel width on the right and
@@ -469,3 +473,63 @@ cargo test -p emulator-gba
 - Without `--cheats`, the Save action writes to `cheats/<system>/<rom>/cheats.json`.
 - Cores are vendored under `crates/cores/`, so upstream core repository changes must be synced manually.
 - Emulator accuracy, timing, and mapper behavior are still validated system by system; prefer focused regression tests for hardware fixes.
+
+
+## PlayStation (HLE BIOS)
+
+```sh
+cargo run -- "roms/ps1/Momotarou Densetsu (Japan).zip"
+cargo run -- "path/to/disc.cue"
+```
+
+PS1 uses the vendored PCSX ReARMed interpreter and software renderer with HLE
+BIOS explicitly enabled. No Sony BIOS is included, downloaded, or required.
+HLE compatibility varies by game; starting one title does not establish full
+PS1 compatibility. The core's native frame rate is used for NTSC/PAL pacing.
+
+A ZIP must contain exactly one CUE and every referenced track, with relative
+paths preserved (for example, `disc/game.cue` can reference
+`tracks/track.bin` beside it under `disc/`). Track paths are relative to the
+CUE directory, independent of the launcher working directory. The ZIP is
+extracted to an owned temporary directory and removed
+when the core closes. Select an extracted CUE when an archive has multiple
+CUEs. CHD, disc swapping, analog pads, and a second memory card are not part of
+this initial integration. Raw BIN requires an explicit system to preserve
+Mega Drive BIN detection.
+
+| PS1 control | Keyboard |
+| --- | --- |
+| D-pad | Arrow keys |
+| Cross / Circle | Z / X |
+| Square / Triangle | A / S |
+| L1 / R1 | Q / W |
+| L2 / R2 | E / R |
+| Start | Enter or Space |
+| Select | Shift or Backspace |
+
+Memory card 1 is stored as `states/ps1/<original-file-stem>/memory-card.mcd`.
+Changed card data is saved atomically every 60 emulated frames and on clean
+exit. ZIP extraction paths never determine save names. Save slots use the
+existing shortcuts: **Cmd+Shift+1–9** to save and **Cmd+1–9** to load on macOS;
+**Ctrl+Shift+1–9** / **Ctrl+1–9** on Windows/Linux. Files are `slot<N>.psst` in
+the same directory. Rejected malformed state loads restore the previous state.
+Main RAM is available to the cheat panel as `ram` (2 MiB).
+
+See [PS1 upstream and build notes](crates/cores/ps1/UPSTREAM.md) for the pinned
+source, local patches, build requirements, and GPL distribution obligations.
+The macOS/Apple Silicon build is verified; other native targets require
+validation, and this Makefile integration does not support MSVC.
+
+Local verification with Momotarou Densetsu (Japan) covers boot/title, dialogue,
+indoor/outdoor movement, menus, audio, and state/card reopening. This is not a
+full playthrough or a compatibility guarantee for other games.
+
+Automated tests require no retail assets. An additional opt-in local disc test
+can exercise ZIP loading (including nested CUE/track paths), HLE boot,
+audio/video, save states and reopening:
+
+```sh
+cargo test -p ps1-core -p revive-core -p revive-cli
+REVIVE_PS1_TEST_ROM="roms/ps1/Momotarou Densetsu (Japan).zip" \
+  cargo test -p revive-core --test ps1_local_disc -- --ignored --nocapture
+```

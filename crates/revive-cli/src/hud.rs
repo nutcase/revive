@@ -36,7 +36,7 @@ impl HudToast {
             .show(ctx, |ui| {
                 egui::Frame::default()
                     .fill(egui::Color32::from_rgba_premultiplied(18, 18, 18, 220))
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(82)))
+                    .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(82)))
                     .inner_margin(egui::Margin::symmetric(12, 8))
                     .show(ui, |ui| {
                         ui.label(

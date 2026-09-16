@@ -409,7 +409,9 @@ fn gameboy_button_mask(button: VirtualButton) -> Option<u8> {
         | VirtualButton::R
         | VirtualButton::C
         | VirtualButton::Z
-        | VirtualButton::Mode => None,
+        | VirtualButton::Mode
+        | VirtualButton::L2
+        | VirtualButton::R2 => None,
     }
 }
 
@@ -429,7 +431,9 @@ fn gameboy_advance_button_mask(button: VirtualButton) -> Option<u16> {
         | VirtualButton::Y
         | VirtualButton::C
         | VirtualButton::Z
-        | VirtualButton::Mode => None,
+        | VirtualButton::Mode
+        | VirtualButton::L2
+        | VirtualButton::R2 => None,
     }
 }
 

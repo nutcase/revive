@@ -144,7 +144,11 @@ impl SnesAdapter {
             VirtualButton::R => self.key_states.r = pressed,
             VirtualButton::Start => self.key_states.start = pressed,
             VirtualButton::Select => self.key_states.select = pressed,
-            VirtualButton::C | VirtualButton::Z | VirtualButton::Mode => return,
+            VirtualButton::C
+            | VirtualButton::Z
+            | VirtualButton::Mode
+            | VirtualButton::L2
+            | VirtualButton::R2 => return,
         }
         self.emulator.set_key_states(&self.key_states);
     }

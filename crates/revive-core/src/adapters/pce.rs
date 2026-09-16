@@ -215,7 +215,9 @@ fn pce_button_bit(button: VirtualButton) -> Option<u8> {
         | VirtualButton::R
         | VirtualButton::C
         | VirtualButton::Z
-        | VirtualButton::Mode => None,
+        | VirtualButton::Mode
+        | VirtualButton::L2
+        | VirtualButton::R2 => None,
     }
 }
 fn load_pce_persistent_saves(emulator: &mut PceEmulator, rom_path: &Path) {

@@ -44,12 +44,16 @@ fn gpu_upload_preserves_rgb_rgba_bgra_colors_and_format_changes() {
         .chunks_exact(4)
         .flat_map(|p| [p[2], p[1], p[0], p[3]])
         .collect();
-    for (format, bytes) in [
-        (PixelFormat::Bgra8888, &bgra[..]),
-        (PixelFormat::Rgba8888, &expected[..]),
-        (PixelFormat::Rgb24, &rgb[..]),
-        (PixelFormat::Bgra8888, &bgra[..]),
+    for (format, bytes, fixed_aspect) in [
+        (PixelFormat::Bgra8888, &bgra[..], false),
+        (PixelFormat::Rgba8888, &expected[..], false),
+        (PixelFormat::Rgb24, &rgb[..], false),
+        (PixelFormat::Bgra8888, &bgra[..], false),
+        (PixelFormat::Rgba8888, &expected[..], true),
     ] {
+        if fixed_aspect {
+            renderer.set_display_aspect((4, 3));
+        }
         renderer.upload_frame(&device, &queue, bytes, 257, 2, format);
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -108,6 +112,14 @@ fn gpu_upload_preserves_rgb_rgba_bgra_colors_and_format_changes() {
             let mapped = readback.get_mapped_range(..);
             for y in 0..2 {
                 let actual = &mapped[y * 1280..y * 1280 + 257 * 4];
+                if fixed_aspect {
+                    // A 4:3 display in a 257x2 target occupies only the center.
+                    // Uploading a non-square source must not stretch it back out.
+                    assert_eq!(&actual[..4], &[0, 0, 0, 255]);
+                    assert_eq!(&actual[256 * 4..], &[0, 0, 0, 255]);
+                    assert_ne!(&actual[128 * 4..128 * 4 + 3], &[0, 0, 0]);
+                    continue;
+                }
                 let expected = &expected[y * 257 * 4..(y + 1) * 257 * 4];
                 for (i, (&a, &b)) in actual.iter().zip(expected).enumerate() {
                     assert!(
