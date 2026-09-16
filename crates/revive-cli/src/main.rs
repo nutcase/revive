@@ -261,6 +261,7 @@ fn run_sdl_loop(
             text_input_active = should_enable_text_input;
         }
 
+        egui_input.update_window_metrics(&window);
         if matches!(
             process_sdl_events(
                 &mut event_pump,
@@ -336,6 +337,8 @@ fn run_sdl_loop(
                 let ui_started = profiler.start();
                 let ctx = egui_input.begin_frame(&window);
                 let mut pending_writes = Vec::new();
+                let mut resize_for_panel = false;
+                let mut panel_width_pixels = 0;
                 if cheat_panel.is_visible() {
                     #[allow(deprecated)]
                     let panel_resp = egui::SidePanel::right("cheat_panel")
@@ -354,11 +357,12 @@ fn run_sdl_loop(
                                     );
                                 });
                         });
-                    let actual_w =
-                        (panel_resp.response.rect.width() * ctx.pixels_per_point()) as u32;
-                    if actual_w != render_state.panel_width_px() {
-                        render_state.set_panel_width_px(actual_w);
-                        render_state.resize_window_for_panel(&mut window, true);
+                    let width_points = panel_resp.response.rect.width();
+                    panel_width_pixels = (width_points * ctx.pixels_per_point()).ceil() as u32;
+                    let actual_w = egui_input.panel_width_window_units(width_points);
+                    if actual_w != render_state.panel_width_window_units() {
+                        render_state.set_panel_width_window_units(actual_w);
+                        resize_for_panel = true;
                     }
                 }
                 hud_toast.draw(&ctx);
@@ -369,22 +373,28 @@ fn run_sdl_loop(
                 let present_started = profiler.start();
                 render_state.present_frame(
                     &window,
-                    cheat_panel.is_visible(),
                     Some(UiRenderData {
                         textures_delta: &full_output.textures_delta,
                         primitives: &primitives,
-                        pixels_per_point: ctx.pixels_per_point(),
+                        pixels_per_point: full_output.pixels_per_point,
+                        panel_width_pixels,
                     }),
                 )?;
 
                 profiler.end(Stage::Present, present_started);
+                // The UI geometry above belongs to the old surface size. Resize
+                // only after presenting it, then lay out again next frame.
+                if resize_for_panel {
+                    render_state.resize_window_for_panel(&mut window, true);
+                    redraw_requested = true;
+                }
                 for write in pending_writes {
                     core_changed |=
                         core.write_memory_byte(&write.region, write.offset, write.value);
                 }
             } else {
                 let present_started = profiler.start();
-                render_state.present_frame(&window, false, None)?;
+                render_state.present_frame(&window, None)?;
                 profiler.end(Stage::Present, present_started);
             }
         }
