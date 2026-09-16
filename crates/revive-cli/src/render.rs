@@ -13,6 +13,7 @@ pub(crate) struct UiRenderData<'a> {
     pub(crate) textures_delta: &'a egui::TexturesDelta,
     pub(crate) primitives: &'a [egui::ClippedPrimitive],
     pub(crate) pixels_per_point: f32,
+    pub(crate) panel_width_pixels: u32,
 }
 
 pub(crate) struct RenderState {
@@ -27,7 +28,7 @@ pub(crate) struct RenderState {
     texture_size: (usize, usize),
     game_w: u32,
     game_h: u32,
-    panel_width_px: u32,
+    panel_width_window_units: u32,
     fixed_aspect: bool,
 }
 
@@ -43,7 +44,7 @@ impl RenderState {
         window: &Window,
         frame_width: usize,
         frame_height: usize,
-        panel_width_px: u32,
+        panel_width_window_units: u32,
     ) -> Result<Self, Box<dyn Error>> {
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
@@ -88,7 +89,7 @@ impl RenderState {
             texture_size: (frame_width, frame_height),
             game_w,
             game_h,
-            panel_width_px,
+            panel_width_window_units,
             fixed_aspect: false,
         })
     }
@@ -99,12 +100,12 @@ impl RenderState {
         self.game_renderer.set_display_aspect(aspect);
     }
 
-    pub(crate) fn panel_width_px(&self) -> u32 {
-        self.panel_width_px
+    pub(crate) fn panel_width_window_units(&self) -> u32 {
+        self.panel_width_window_units
     }
 
-    pub(crate) fn set_panel_width_px(&mut self, panel_width_px: u32) {
-        self.panel_width_px = panel_width_px;
+    pub(crate) fn set_panel_width_window_units(&mut self, panel_width_window_units: u32) {
+        self.panel_width_window_units = panel_width_window_units;
     }
 
     pub(crate) fn resize_window_for_panel(&mut self, window: &mut Window, panel_visible: bool) {
@@ -150,7 +151,6 @@ impl RenderState {
     pub(crate) fn present_frame(
         &mut self,
         window: &Window,
-        panel_visible: bool,
         ui: Option<UiRenderData<'_>>,
     ) -> Result<(), Box<dyn Error>> {
         self.sync_surface_size(window);
@@ -216,11 +216,11 @@ impl RenderState {
                 multiview_mask: None,
             });
             let mut render_pass = render_pass.forget_lifetime();
-            let panel_px = if panel_visible {
-                window_units_to_pixels(window, self.panel_width_px).min(self.surface_config.width)
-            } else {
-                0
-            };
+            // Reserve exactly the pixels occupied by this frame's egui panel.
+            let panel_px = ui
+                .as_ref()
+                .map_or(0, |ui| ui.panel_width_pixels)
+                .min(self.surface_config.width);
             self.game_renderer.draw(
                 &self.queue,
                 &mut render_pass,
@@ -270,7 +270,7 @@ impl RenderState {
 
     fn window_width(&self, panel_visible: bool) -> u32 {
         if panel_visible {
-            self.game_w + self.panel_width_px
+            self.game_w + self.panel_width_window_units
         } else {
             self.game_w
         }
@@ -328,13 +328,4 @@ fn create_surface(
     let target = unsafe { wgpu::SurfaceTargetUnsafe::from_display_and_window(window, window)? };
     let surface = unsafe { instance.create_surface_unsafe(target)? };
     Ok(surface)
-}
-
-fn window_units_to_pixels(window: &Window, width: u32) -> u32 {
-    let (window_width, _) = window.size();
-    let (pixel_width, _) = window.size_in_pixels();
-    if window_width == 0 {
-        return width;
-    }
-    ((width as f32) * (pixel_width as f32 / window_width as f32)).round() as u32
 }
