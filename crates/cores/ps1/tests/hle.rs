@@ -37,6 +37,19 @@ fn hle_executes_homebrew_and_restores_state_and_memory_card() {
     core.write_ram(0x1ff000, 7);
     core.load_state(&state).unwrap();
     assert_eq!(core.ram()[0x1ff000], 42);
+    // Invalid embedded lengths must fail without losing the running state.
+    let spu_size_offset = state.windows(5).position(|w| w == b"PBOSS").unwrap() - 4;
+    core.write_ram(0x1ff000, 17);
+    let before = core.ram().to_vec();
+    for invalid_size in [0u32, 0x7fff_ffff, 0xffff_ffff] {
+        let mut corrupt = state.clone();
+        corrupt[spu_size_offset..spu_size_offset + 4].copy_from_slice(&invalid_size.to_le_bytes());
+        assert!(core.load_state(&corrupt).is_err());
+        assert_eq!(core.ram(), before);
+    }
+    let corrupt = vec![0xff; state.len()];
+    assert!(core.load_state(&corrupt).is_err());
+    assert_eq!(core.ram(), before);
     core.step_frame().unwrap();
     core.set_audio_enabled(false);
     core.step_frame().unwrap();

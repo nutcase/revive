@@ -850,8 +850,12 @@ int LoadState(const char *file) {
 	f = SaveFuncs.open(file, "rb");
 	if (f == NULL) return -1;
 
+#ifdef HAVE_LIBRETRO
+	file = "(stream)"; // The libretro argument is binary data, not a filename.
+#else
 	if (!file)
 		file = "(stream)";
+#endif
 	memset(header, 0, sizeof(header));
 	SaveFuncs.read(f, header, 16);
 	if (strncmp("RASTATE", header, 7) == 0) {
@@ -929,8 +933,8 @@ int LoadState(const char *file) {
 	}
 	else
 	{
-		SysPrintf("broken spu save size %d, attempting to skip\n", Size);
-		SaveFuncs.seek(f, Size, SEEK_CUR);
+		SysPrintf("invalid spu save size %d\n", Size);
+		goto cleanup;
 	}
 
 	sioFreeze(f, 0);

@@ -324,6 +324,32 @@ pub(crate) fn button_label(button: VirtualButton) -> &'static str {
     }
 }
 
+// Face buttons follow physical positions: Z=Cross, X=Circle, A=Square, S=Triangle.
+static PS1_BINDINGS: [ButtonBinding; 14] = [
+    binding(VirtualButton::Up, &[Keycode::Up], &[Scancode::Up]),
+    binding(VirtualButton::Down, &[Keycode::Down], &[Scancode::Down]),
+    binding(VirtualButton::Left, &[Keycode::Left], &[Scancode::Left]),
+    binding(VirtualButton::Right, &[Keycode::Right], &[Scancode::Right]),
+    binding(VirtualButton::B, &[Keycode::Z], &[Scancode::Z]),
+    binding(VirtualButton::A, &[Keycode::X], &[Scancode::X]),
+    binding(VirtualButton::Y, &[Keycode::A], &[Scancode::A]),
+    binding(VirtualButton::X, &[Keycode::S], &[Scancode::S]),
+    binding(VirtualButton::L, &[Keycode::Q], &[Scancode::Q]),
+    binding(VirtualButton::R, &[Keycode::W], &[Scancode::W]),
+    binding(VirtualButton::L2, &[Keycode::E], &[Scancode::E]),
+    binding(VirtualButton::R2, &[Keycode::R], &[Scancode::R]),
+    binding(
+        VirtualButton::Start,
+        &[Keycode::Return, Keycode::Space],
+        &[Scancode::Return, Scancode::Space],
+    ),
+    binding(
+        VirtualButton::Select,
+        &[Keycode::Backspace, Keycode::RShift, Keycode::LShift],
+        &[Scancode::Backspace, Scancode::RShift, Scancode::LShift],
+    ),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,29 +415,3 @@ mod tests {
         }
     }
 }
-
-// Face buttons follow physical positions: Z=Cross, X=Circle, A=Square, S=Triangle.
-static PS1_BINDINGS: [ButtonBinding; 14] = [
-    binding(VirtualButton::Up, &[Keycode::Up], &[Scancode::Up]),
-    binding(VirtualButton::Down, &[Keycode::Down], &[Scancode::Down]),
-    binding(VirtualButton::Left, &[Keycode::Left], &[Scancode::Left]),
-    binding(VirtualButton::Right, &[Keycode::Right], &[Scancode::Right]),
-    binding(VirtualButton::B, &[Keycode::Z], &[Scancode::Z]),
-    binding(VirtualButton::A, &[Keycode::X], &[Scancode::X]),
-    binding(VirtualButton::Y, &[Keycode::A], &[Scancode::A]),
-    binding(VirtualButton::X, &[Keycode::S], &[Scancode::S]),
-    binding(VirtualButton::L, &[Keycode::Q], &[Scancode::Q]),
-    binding(VirtualButton::R, &[Keycode::W], &[Scancode::W]),
-    binding(VirtualButton::L2, &[Keycode::E], &[Scancode::E]),
-    binding(VirtualButton::R2, &[Keycode::R], &[Scancode::R]),
-    binding(
-        VirtualButton::Start,
-        &[Keycode::Return, Keycode::Space],
-        &[Scancode::Return, Scancode::Space],
-    ),
-    binding(
-        VirtualButton::Select,
-        &[Keycode::Backspace, Keycode::RShift, Keycode::LShift],
-        &[Scancode::Backspace, Scancode::RShift, Scancode::LShift],
-    ),
-];

@@ -1,6 +1,6 @@
 # Revive
 
-Revive is a Rust emulator development workspace and integrated SDL2/OpenGL/egui
+Revive is a Rust emulator development workspace and integrated SDL3/wgpu/egui
 frontend for several vendored emulator cores. It is built for working on classic
 console emulation, save states, memory maps, controller input, audio/video
 timing, cheat search, and frontend integration in one local repository.
@@ -11,8 +11,8 @@ differences between the underlying emulator cores.
 
 The repository is useful for people searching for Rust emulator projects,
 multi-system emulator frontends, NES/SNES/Game Boy/GBA emulator development,
-Sega 8-bit and Mega Drive emulation, PC Engine emulation, SDL2 emulators,
-OpenGL frame presentation, egui tooling, save-state serialization, cartridge
+Sega 8-bit and Mega Drive emulation, PC Engine emulation, SDL3 emulators,
+wgpu frame presentation, egui tooling, save-state serialization, cartridge
 mappers, PPU/video timing, APU/audio timing, and cheat or RAM search tools.
 
 ## Supported Systems
@@ -41,7 +41,7 @@ Good entry points:
 - Emulator cores: `crates/cores/*`
 - System adapters and common runtime API: `crates/revive-core`
 - Cheat search and memory editing model: `crates/revive-cheat`
-- SDL2/OpenGL/egui frontend loop: `crates/revive-cli`
+- SDL3/wgpu/egui frontend loop: `crates/revive-cli`
 - Save-state examples: `crates/cores/gameboy/gb/src/state.rs` and `crates/cores/gameboy/gba/src/state.rs`
 - Input, frame, audio, memory, save-state, and persistent-save integration:
   `crates/revive-core/src/adapters/`
@@ -73,7 +73,7 @@ Revive-specific crates are split by responsibility.
 
 - `crates/revive-core`: system detection, emulator adapters, and the common runtime API
 - `crates/revive-cheat`: UI-independent cheat search, cheat definitions, and JSON persistence
-- `crates/revive-cli`: SDL2 + OpenGL + egui frontend
+- `crates/revive-cli`: SDL3 + wgpu + egui frontend
 
 ## Requirements
 
@@ -83,8 +83,8 @@ Revive-specific crates are split by responsibility.
 - GNU make (for the vendored PS1 C core)
 - Apple Silicon native builds are recommended on macOS
 
-SDL2 is built through the `sdl2` crate's `bundled` / `static-link` features, so
-a system SDL2 installation is usually not required.
+SDL3 is built through the `sdl3` crate's `build-from-source-static` feature, so
+a system SDL3 installation is not required.
 
 ## Running
 
@@ -424,7 +424,7 @@ resolved by the `revive-core` adapter for the active system.
 
 ### `revive-cli`
 
-`revive-cli` is the SDL2 + OpenGL + egui frontend.
+`revive-cli` is the SDL3 + wgpu + egui frontend.
 
 Main flow:
 
@@ -434,7 +434,7 @@ Main flow:
 4. In the event loop, process input, save states, and cheat panel actions.
 5. Each frame, run `apply_cheats -> step_frame -> apply_cheats`.
 6. Feed samples into the audio queue.
-7. Upload the RGB24 frame to an OpenGL texture.
+7. Upload the frame using its RGB24/RGBA/BGRA format to a wgpu texture.
 8. Draw the egui cheat panel on the right side.
 
 When the panel is open, the viewport reserves the panel width on the right and
@@ -488,7 +488,10 @@ HLE compatibility varies by game; starting one title does not establish full
 PS1 compatibility. The core's native frame rate is used for NTSC/PAL pacing.
 
 A ZIP must contain exactly one CUE and every referenced track, with relative
-paths preserved. It is extracted to an owned temporary directory and removed
+paths preserved (for example, `disc/game.cue` can reference
+`tracks/track.bin` beside it under `disc/`). Track paths are relative to the
+CUE directory, independent of the launcher working directory. The ZIP is
+extracted to an owned temporary directory and removed
 when the core closes. Select an extracted CUE when an archive has multiple
 CUEs. CHD, disc swapping, analog pads, and a second memory card are not part of
 this initial integration. Raw BIN requires an explicit system to preserve
@@ -507,16 +510,23 @@ Mega Drive BIN detection.
 Memory card 1 is stored as `states/ps1/<original-file-stem>/memory-card.mcd`.
 Changed card data is saved atomically every 60 emulated frames and on clean
 exit. ZIP extraction paths never determine save names. Save slots use the
-existing Cmd/Ctrl shortcuts and `slot<N>.psst` in the same directory. Main RAM
-is available to the cheat panel as `ram` (2 MiB).
+existing shortcuts: **Cmd+Shift+1–9** to save and **Cmd+1–9** to load on macOS;
+**Ctrl+Shift+1–9** / **Ctrl+1–9** on Windows/Linux. Files are `slot<N>.psst` in
+the same directory. Rejected malformed state loads restore the previous state.
+Main RAM is available to the cheat panel as `ram` (2 MiB).
 
 See [PS1 upstream and build notes](crates/cores/ps1/UPSTREAM.md) for the pinned
 source, local patches, build requirements, and GPL distribution obligations.
 The macOS/Apple Silicon build is verified; other native targets require
 validation, and this Makefile integration does not support MSVC.
 
+Local verification with Momotarou Densetsu (Japan) covers boot/title, dialogue,
+indoor/outdoor movement, menus, audio, and state/card reopening. This is not a
+full playthrough or a compatibility guarantee for other games.
+
 Automated tests require no retail assets. An additional opt-in local disc test
-can exercise ZIP loading, HLE boot, audio/video, save states and reopening:
+can exercise ZIP loading (including nested CUE/track paths), HLE boot,
+audio/video, save states and reopening:
 
 ```sh
 cargo test -p ps1-core -p revive-core -p revive-cli

@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut file =
                 std::fs::File::create(output.join(format!("frame-{:05}.ppm", frame + 1)))?;
             write!(file, "P6\n{w} {h}\n255\n")?;
-            for pixel in data.chunks_exact(4) {
+            for pixel in data.as_chunks::<4>().0 {
                 file.write_all(&pixel[..3])?;
             }
             println!(

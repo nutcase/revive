@@ -1,7 +1,11 @@
 //! Opt-in local integration test; copyrighted test data is never committed.
 //! REVIVE_PS1_TEST_ROM=... cargo test -p revive-core --test ps1_local_disc -- --ignored
 use revive_core::{CoreInstance, SystemKind, VirtualButton};
-use std::{path::PathBuf, time::Instant};
+use std::{
+    io::{Read, Write},
+    path::PathBuf,
+    time::Instant,
+};
 #[test]
 #[ignore = "requires a local PS1 ZIP containing CUE/BIN via REVIVE_PS1_TEST_ROM"]
 fn zipped_disc_hle_audio_input_and_save_round_trip() {
@@ -18,7 +22,7 @@ fn zipped_disc_hle_audio_input_and_save_round_trip() {
         .unwrap();
     let stem = temp.path().file_name().unwrap();
     let rom = temp.path().join(stem).with_extension("zip");
-    std::fs::copy(source, &rom).unwrap();
+    std::fs::copy(&source, &rom).unwrap();
     let mut core = CoreInstance::load_rom(&rom, None).unwrap();
     assert_eq!(core.system(), SystemKind::PlayStation);
     assert_eq!(core.audio_spec().sample_rate_hz, 44_100);
@@ -44,7 +48,9 @@ fn zipped_disc_hle_audio_input_and_save_round_trip() {
     assert!(
         frame
             .data
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[..3] != [0, 0, 0])
             .count()
             > 1000
@@ -69,6 +75,59 @@ fn zipped_disc_hle_audio_input_and_save_round_trip() {
     core.step_frame().unwrap();
     core.flush_persistent_save().unwrap();
     assert_eq!(std::fs::read(saves.join("memory-card.mcd")).unwrap(), card);
+    drop(core);
+    // Keep the same disc, but move its CUE and tracks into nested ZIP paths.
+    // This must work independently of the process working directory.
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(&source).unwrap()).unwrap();
+    let mut nested = zip::ZipWriter::new(std::fs::File::create(&rom).unwrap());
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).unwrap();
+        if entry.is_dir() {
+            continue;
+        }
+        let name = entry.enclosed_name().unwrap();
+        let mut data = Vec::new();
+        entry.read_to_end(&mut data).unwrap();
+        let path = if name
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("cue"))
+        {
+            let cue = String::from_utf8(data).unwrap();
+            let mut rewritten = String::new();
+            for line in cue.lines() {
+                if line.trim_start().starts_with("FILE ") {
+                    let filename = line.split('"').nth(1).expect("quoted CUE FILE");
+                    let basename = std::path::Path::new(filename)
+                        .file_name()
+                        .unwrap()
+                        .to_str()
+                        .unwrap();
+                    rewritten.push_str(&line.replace(filename, &format!("tracks/{basename}")));
+                } else {
+                    rewritten.push_str(line);
+                }
+                rewritten.push('\n');
+            }
+            data = rewritten.into_bytes();
+            "disc/game.cue".to_owned()
+        } else {
+            format!(
+                "disc/tracks/{}",
+                name.file_name().unwrap().to_str().unwrap()
+            )
+        };
+        nested
+            .start_file(
+                path,
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored),
+            )
+            .unwrap();
+        nested.write_all(&data).unwrap();
+    }
+    nested.finish().unwrap();
+    let mut core = CoreInstance::load_rom(&rom, None).unwrap();
+    core.step_frame().unwrap();
     drop(core);
     std::fs::remove_dir_all(saves).unwrap();
     println!(

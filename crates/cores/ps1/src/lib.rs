@@ -152,8 +152,14 @@ impl Emulator {
         if data.len() != unsafe { retro_serialize_size() } {
             return Err("Invalid PS1 state size".into());
         }
+        let backup = self.save_state()?;
         if !unsafe { retro_unserialize(data.as_ptr().cast(), data.len()) } {
-            return Err("PS1 state load failed".into());
+            // Native deserialization updates RAM/devices as it reads. Restore
+            // the previous state before exposing the failed load to the caller.
+            if !unsafe { retro_unserialize(backup.as_ptr().cast(), backup.len()) } {
+                return Err("PS1 state load and recovery failed; restart the game".into());
+            }
+            return Err("Invalid PS1 state; previous state restored".into());
         }
         unsafe {
             revive_ps1_clear_audio();

@@ -15,7 +15,13 @@ Local upstream changes:
 
 - `frontend/libretro.c`: restrict the legacy iOS `ptrace` workaround to iOS
   builds with a dynamic recompiler. Revive uses the interpreter and must not
-  trace its own macOS process.
+  trace its own macOS process. Bound in-memory save reads, writes, and seeks to
+  the actual buffer; abort invalid streams inside C. The Rust host restores
+  the previous state after a rejected load.
+- `libpcsxcore/misc.c`: reject invalid SPU state lengths and identify libretro
+  state buffers as streams in error logs instead of treating bytes as a path.
+- `libpcsxcore/cdriso.c`: resolve relative track paths against the CUE parent,
+  preserving subdirectories and avoiding process-working-directory lookup.
 - `Makefile`: pin the generated revision string to `8625c39-revive` instead of
   accidentally identifying the parent Revive repository as the upstream core.
 - `libpcsxcore/sio.c`: explicitly zero-initialize the memory-card buffers so
@@ -41,6 +47,7 @@ supported by this upstream Makefile integration.
 
 `cargo test -p ps1-core` runs an original tiny MIPS program without retail
 assets, covering HLE startup, singleton ownership, frame/audio progression,
-RAM and state restoration, audio disabling, card validation, and reopening.
+RAM and state restoration, malformed state rejection and recovery, audio
+disabling, card validation, and reopening.
 The `probe` example can capture PPM frames and send timed pad input to a user's
 locally supplied disc for manual compatibility verification.

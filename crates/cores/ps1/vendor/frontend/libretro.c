@@ -16,6 +16,7 @@
 #include <math.h>
 #include <errno.h>
 #include <assert.h>
+#include <setjmp.h>
 #ifdef __MACH__
 #include <unistd.h>
 #include <sys/syscall.h>
@@ -1252,37 +1253,35 @@ size_t retro_serialize_size(void)
    return 0x440000;
 }
 
+/* This libretro host is synchronous and single-instance. Abort a malformed
+ * in-memory stream before an upstream freeze routine can access past its end.
+ * The Rust host restores a valid backup after a failed load. */
 struct save_fp
 {
    char *buf;
-   size_t pos;
+   size_t pos, size;
    int is_write;
 };
+static struct save_fp save_stream;
+static size_t save_capacity;
+static jmp_buf save_abort;
 
 static void *save_open(const char *name, const char *mode)
 {
-   struct save_fp *fp;
-
    if (name == NULL || mode == NULL)
       return NULL;
-
-   fp = malloc(sizeof(*fp));
-   if (fp == NULL)
-      return NULL;
-
-   fp->buf = (char *)name;
-   fp->pos = 0;
-   fp->is_write = (mode[0] == 'w' || mode[1] == 'w');
-
-   return fp;
+   save_stream.buf = (char *)name;
+   save_stream.pos = 0;
+   save_stream.size = save_capacity;
+   save_stream.is_write = (mode[0] == 'w' || mode[1] == 'w');
+   return &save_stream;
 }
 
 static int save_read(void *file, void *buf, u32 len)
 {
    struct save_fp *fp = file;
-   if (fp == NULL || buf == NULL)
-      return -1;
-
+   if (fp == NULL || buf == NULL || fp->pos > fp->size || len > fp->size - fp->pos)
+      longjmp(save_abort, 1);
    memcpy(buf, fp->buf + fp->pos, len);
    fp->pos += len;
    return len;
@@ -1291,9 +1290,8 @@ static int save_read(void *file, void *buf, u32 len)
 static int save_write(void *file, const void *buf, u32 len)
 {
    struct save_fp *fp = file;
-   if (fp == NULL || buf == NULL)
-      return -1;
-
+   if (fp == NULL || buf == NULL || fp->pos > fp->size || len > fp->size - fp->pos)
+      longjmp(save_abort, 1);
    memcpy(fp->buf + fp->pos, buf, len);
    fp->pos += len;
    return len;
@@ -1302,35 +1300,30 @@ static int save_write(void *file, const void *buf, u32 len)
 static long save_seek(void *file, long offs, int whence)
 {
    struct save_fp *fp = file;
-   if (fp == NULL)
-      return -1;
-
-   switch (whence)
-   {
-   case SEEK_CUR:
-      fp->pos += offs;
-      return fp->pos;
-   case SEEK_SET:
-      fp->pos = offs;
-      return fp->pos;
-   default:
-      return -1;
+   size_t base, distance;
+   if (fp == NULL || (whence != SEEK_CUR && whence != SEEK_SET))
+      longjmp(save_abort, 1);
+   base = whence == SEEK_CUR ? fp->pos : 0;
+   if (base > fp->size)
+      longjmp(save_abort, 1);
+   if (offs < 0) {
+      distance = (size_t)(-(offs + 1)) + 1;
+      if (distance > base)
+         longjmp(save_abort, 1);
+      fp->pos = base - distance;
+   } else {
+      if ((size_t)offs > fp->size - base)
+         longjmp(save_abort, 1);
+      fp->pos = base + (size_t)offs;
    }
+   return fp->pos;
 }
 
 static void save_close(void *file)
 {
    struct save_fp *fp = file;
-   size_t r_size = retro_serialize_size();
-   if (fp == NULL)
-      return;
-
-   if (fp->pos > r_size)
-      LogErr("ERROR: save buffer overflow detected\n");
-   else if (fp->is_write && fp->pos < r_size)
-      // make sure we don't save trash in leftover space
-      memset(fp->buf + fp->pos, 0, r_size - fp->pos);
-   free(fp);
+   if (fp && fp->is_write && fp->pos < fp->size)
+      memset(fp->buf + fp->pos, 0, fp->size - fp->pos);
 }
 
 struct PcsxSaveFuncs SaveFuncs = {
@@ -1340,6 +1333,11 @@ struct PcsxSaveFuncs SaveFuncs = {
 bool retro_serialize(void *data, size_t size)
 {
    int ret;
+   if (data == NULL || size != retro_serialize_size())
+      return false;
+   save_capacity = size;
+   if (setjmp(save_abort))
+      return false;
    CdromFrontendId = disk_current_index;
    ret = SaveState(data);
 
@@ -1353,6 +1351,11 @@ static bool disk_set_image_index(unsigned int index);
 bool retro_unserialize(const void *data, size_t size)
 {
    int ret;
+   if (data == NULL || size != retro_serialize_size())
+      return false;
+   save_capacity = size;
+   if (setjmp(save_abort))
+      return false;
    CdromFrontendId = -1;
    ret = LoadState(data);
    if (ret)

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Revive is a unified SDL2/OpenGL/egui launcher for the emulator cores vendored into this repository under `crates/cores/`. The frontend runs one active ROM at a time and routes system-specific behavior through `revive-core` adapters.
+Revive is a unified SDL3/wgpu/egui launcher for the emulator cores vendored into this repository under `crates/cores/`. The frontend runs one active ROM at a time and routes system-specific behavior through `revive-core` adapters.
 
 Vendored core crates:
 
@@ -41,34 +41,34 @@ cargo test -p nes-emulator save_state
 cargo test -p snes-core
 ```
 
-SDL2 is vendored via `sdl2 = { features = ["bundled", "static-link"] }`, so no system SDL install is required, but a C/C++ toolchain and CMake are. `.cargo/config.toml` sets `CMAKE_POLICY_VERSION_MINIMUM=3.5` to work around newer CMake versions rejecting the bundled build.
+SDL3 is vendored via `sdl3 = { features = ["build-from-source-static", "raw-window-handle"] }`, so no system SDL install is required, but a C/C++ toolchain and CMake are. `.cargo/config.toml` sets `CMAKE_POLICY_VERSION_MINIMUM=3.5` to work around newer CMake versions rejecting the bundled build.
 
 ## Architecture
 
 Workspace layout, default binary is `revive-cli`:
 
-- **`revive-core`** — Defines the `CoreInstance` enum that wraps each backend (`NesAdapter`, `SnesAdapter`, `Sg1000Adapter`, `MasterSystemAdapter`, `MegaDriveAdapter`, `PceAdapter`) and exposes a uniform surface: `load_rom`, `step_frame`, `frame` (returning an `RGB24` `FrameView`), `audio_spec`/`drain_audio_i16`, `set_button`, `memory_regions`/`read_memory`/`write_memory_byte`, `save_state_to_slot`/`load_state_from_slot`, `flush_persistent_save`. `SystemKind` and `VirtualButton` are the two abstractions every adapter translates to/from its native types. `detect_system` handles extension-based routing, with a `SEGA` header check as the only disambiguator for `.bin`.
+- **`revive-core`** — Defines the `CoreInstance` enum that wraps each backend (`NesAdapter`, `SnesAdapter`, `Sg1000Adapter`, `MasterSystemAdapter`, `MegaDriveAdapter`, `PceAdapter`, `GameBoyAdapter`, `GameBoyAdvanceAdapter`, `Ps1Adapter`) and exposes a uniform surface: `load_rom`, `step_frame`, `frame` (returning a `FrameView` tagged as RGB24, RGBA8888, or BGRA8888), `audio_spec`/`drain_audio_i16`, `set_button`, `memory_regions`/`read_memory`/`write_memory_byte`, `save_state_to_slot`/`load_state_from_slot`, `flush_persistent_save`. `SystemKind` and `VirtualButton` are the two abstractions every adapter translates to/from its native types. `detect_system` handles extension-based routing, with a `SEGA` header check as the only disambiguator for `.bin`.
 
 - **`revive-cheat`** — UI-independent. `CheatSearch` runs incremental RAM scans (`SearchFilter` variants split into snapshot-needing vs. value-only in `needs_snapshot`). `CheatManager` persists `CheatEntry` lists as JSON. No dependency on `revive-core` — entries reference regions by string ID (`"wram"`, `"sram"`, `"cpu_ram"`, `"prg_ram"`, `"cart_ram"`, `"bram"`) which the CLI passes straight through to `CoreInstance::write_memory_byte`.
 
-- **`revive-cli`** — The SDL2/OpenGL/egui frontend. One ROM at a time, single event loop in `run_sdl_loop`. `FrameClock` paces the main thread using per-system native refresh rates (NES/SNES 60.0988, MD 59.9227, PCE 60, GB/GBA 59.7275). Each frame: poll events → apply cheats → `step_frame` → re-apply cheats → drain audio into the `AudioQueue<i16>` → upload `RGB24` frame data into an OpenGL texture → render the optional egui cheat panel. Key mapping is per-system (`nes_keycode_button`, `snes_keycode_button`, etc.); state slots are handled in `handle_state_key` with Cmd+1-9 for load and Cmd+Shift+1-9 for save on macOS, and Ctrl+1-9 / Ctrl+Shift+1-9 on Windows/Linux.
+- **`revive-cli`** — The SDL3/wgpu/egui frontend. One ROM at a time, single event loop in `run_sdl_loop`. `FrameClock` paces the main thread using per-system native refresh rates (NES/SNES 60.0988, MD 59.9227, PCE 60, GB/GBA 59.7275; PS1 reports the active NTSC/PAL rate). Each frame: poll events → apply cheats → `step_frame` → re-apply cheats → drain audio into an SDL3 audio stream → upload format-tagged frame data into a wgpu texture → render the optional egui cheat panel. Key mapping is per-system (`nes_keycode_button`, `snes_keycode_button`, etc.); state slots are handled in `handle_state_key` with Cmd+1-9 for load and Cmd+Shift+1-9 for save on macOS, and Ctrl+1-9 / Ctrl+Shift+1-9 on Windows/Linux.
 
 - **`crates/cores/*`** — Vendored emulator cores copied from the original standalone projects. Keep local fixes here when they are required by Revive.
 
 ### Per-system quirks to be aware of
 
 - **NES**: controllers are bitmasks (`nes_button_mask`), pushed to the core via `set_controller`/`set_controller2` on every press/release.
-- **SNES**: audio uses `AUDIO_BACKEND=sdl_callback` — the env var is set around `SnesEmulator::new` and restored afterwards. Audio is pulled per-frame with a 60 Hz remainder accumulator in `drain_audio_i16`. Framebuffer is `u32` ARGB and is re-expanded to RGB24 each frame.
+- **SNES**: audio uses `AUDIO_BACKEND=sdl_callback` — the env var is set around `SnesEmulator::new` and restored afterwards. Audio is pulled per-frame with a 60 Hz remainder accumulator in `drain_audio_i16`. Framebuffer is `u32` ARGB, exposed as BGRA8888 bytes.
 - **SG-1000**: implemented as a separate `sg1000-core` crate, not as a Mega Drive mode. The core has a Z80 CPU, TMS9918A-style VDP, SN76489 PSG, 1 KiB mirrored work RAM, and active-low two-button controller ports. ROM auto-detection uses `.sg`/`.sg1000`; `.bin` remains explicit unless it has a Mega Drive `SEGA` header.
 - **Master System**: implemented as a separate `mastersystem-core` crate, not as a Mega Drive mode. It shares the Z80/SN76489 family shape with SG-1000, but has its own SMS Mode 4 VDP path, CRAM, 8 KiB mirrored work RAM, standard 16 KiB bank mapper, and `.sms`/`.mk3` detection.
 - **Mega Drive**: both pads default to 6-button. `step_frame` loops `step()` until `frame_ready`.
 - **PC Engine**: joypad is an active-low byte (`pad_state` starts at `0xFF`). HuCard ROMs (`.pce`) load backup RAM (`.sav`) and BRAM (`.brm`) siblings to the ROM on boot; raw binaries are loaded at `$C000`. `flush_persistent_save` only writes if `hucard`.
 
-- **PlayStation**: `Ps1Adapter` hosts the statically linked PCSX ReARMed libretro core with HLE forced and no firmware directory. Native globals require one thread-confined instance per process. CUE/BIN or a ZIP containing one CUE and its tracks loads through `ps1_disc`; the owned temporary extraction survives until native handles close. Card 1 is saved atomically in `states/ps1/<original-stem>/memory-card.mcd` every 60 frames when changed. State slots use `.psst`. The core supplies the active NTSC/PAL frame rate, 44.1 kHz stereo, and RGBA frames; presentation stays 4:3 across resolution changes. No CHD, disc swapping, or analog pad in this initial integration. Read `crates/cores/ps1/UPSTREAM.md` before changing the vendored build or distributing binaries.
+- **PlayStation**: `Ps1Adapter` hosts the statically linked PCSX ReARMed libretro core with HLE forced and no firmware directory. Native globals require one thread-confined instance per process. CUE/BIN or a ZIP containing one CUE and its tracks loads through `ps1_disc`; the owned temporary extraction survives until native handles close. Native track paths must resolve against the CUE parent, preserving subdirectories. Card 1 is saved atomically in `states/ps1/<original-stem>/memory-card.mcd` every 60 frames when changed. State slots use `.psst`; bounded native stream reads reject invalid lengths and the Rust wrapper restores a pre-load snapshot after rejection. The core supplies the active NTSC/PAL frame rate, 44.1 kHz stereo, and RGBA frames; presentation stays 4:3 across resolution changes. No CHD, disc swapping, or analog pad in this initial integration. Run `cargo test -p ps1-core` for asset-free HLE/state regression coverage and the opt-in `ps1_local_disc` test for a local ZIP (see README). Read `crates/cores/ps1/UPSTREAM.md` before changing the vendored build or distributing binaries.
 
 ### State and save files
 
-Save states live in `states/<system>/<rom-stem>/slot<N>.<ext>` (relative to CWD), created on demand. Extensions: NES `.sav`, SNES `.sns`, SG-1000 `.sgs`, Master System `.smsst`, MD `.mdst`, PCE `.pcst`, GBA `.gbas`. SRAM/backup is separate and flushed on clean exit only (`core.flush_persistent_save()` in the shutdown path — crashes skip it). Cheats default to `cheats/<system>/<rom-stem>/cheats.json`.
+Save states live in `states/<system>/<rom-stem>/slot<N>.<ext>` (relative to CWD), created on demand. Extensions: NES `.sav`, SNES `.sns`, SG-1000 `.sgs`, Master System `.smsst`, MD `.mdst`, PCE `.pcst`, GBA `.gbas`, PS1 `.psst`. PS1 card 1 is also flushed every 60 frames when changed. Other SRAM/backup is separate and flushed on clean exit only (`core.flush_persistent_save()` in the shutdown path — crashes skip it). Cheats default to `cheats/<system>/<rom-stem>/cheats.json`.
 
 ## Coding notes
 
