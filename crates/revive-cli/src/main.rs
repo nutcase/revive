@@ -125,10 +125,10 @@ where
 fn print_usage() {
     println!("Usage:");
     println!(
-        "  revive [rom] [--system nes|snes|sg1000|sms|megadrive|pce|gb|gbc|gba|ps1] [--cheats file.json] [--no-audio]"
+        "  revive [rom] [--system nes|snes|sg1000|sms|megadrive|pce|gb|gbc|gba|ps1|n64] [--cheats file.json] [--no-audio]"
     );
     println!(
-        "  revive run [rom] [--system nes|snes|sg1000|sms|megadrive|pce|gb|gbc|gba|ps1] [--cheats file.json] [--no-audio]"
+        "  revive run [rom] [--system nes|snes|sg1000|sms|megadrive|pce|gb|gbc|gba|ps1|n64] [--cheats file.json] [--no-audio]"
     );
     println!("  revive --select");
     println!();
@@ -169,6 +169,10 @@ fn select_rom_path() -> Option<PathBuf> {
         .add_filter(
             SystemKind::PlayStation.label(),
             SystemKind::PlayStation.dialog_extensions(),
+        )
+        .add_filter(
+            SystemKind::Nintendo64.label(),
+            SystemKind::Nintendo64.dialog_extensions(),
         )
         .add_filter("Game Boy", &["gb", "gbc"])
         .add_filter(
@@ -224,7 +228,10 @@ fn run_sdl_loop(
         frame_height,
         PANEL_WIDTH_DEFAULT as u32,
     )?;
-    if core.system() == SystemKind::PlayStation {
+    if matches!(
+        core.system(),
+        SystemKind::PlayStation | SystemKind::Nintendo64
+    ) {
         render_state.set_display_aspect((4, 3));
     }
     render_state.resize_window_for_panel(&mut window, false);
@@ -234,11 +241,16 @@ fn run_sdl_loop(
     } else {
         Some(open_audio_output(&sdl, &mut core)?)
     };
-    let audio_output = audio_output;
+    let mut audio_output = audio_output;
     let mut audio_scratch = Vec::new();
     let mut event_pump = sdl.event_pump().map_err(sdl_error)?;
     let mut frame_clock = FrameClock::with_rate(core.frame_rate_hz());
     let mut input_state = InputState::default();
+    let mut n64_input = if core.system() == SystemKind::Nintendo64 {
+        Some(input::N64Input::new(&sdl).map_err(sdl_error)?)
+    } else {
+        None
+    };
     let mut cheat_panel = CheatPanel::new();
     let mut hud_toast = HudToast::default();
     let mut prev_panel_visible = cheat_panel.is_visible();
@@ -287,9 +299,13 @@ fn run_sdl_loop(
             prev_panel_visible = cheat_panel.is_visible();
         }
 
-        if cheat_panel.is_visible() && egui_ctx.egui_wants_keyboard_input() {
+        if !window.has_input_focus()
+            || (cheat_panel.is_visible() && egui_ctx.egui_wants_keyboard_input())
+        {
             input_state.clear();
             release_keyboard_input(&mut core);
+        } else if let Some(input) = &mut n64_input {
+            input.sync(&mut core, &event_pump, &input_state);
         } else {
             sync_keyboard_input(&mut core, &event_pump, &input_state);
         }
@@ -305,13 +321,13 @@ fn run_sdl_loop(
         profiler.end(Stage::Core, core_started);
         let audio_started = profiler.start();
         if !paused {
-            if let Some(output) = audio_output.as_ref() {
+            if let Some(output) = audio_output.as_mut() {
                 feed_audio(output, &mut core, &mut audio_scratch);
             } else {
                 core.drain_audio_i16(&mut audio_scratch);
             }
         } else if !was_paused {
-            if let Some(output) = audio_output.as_ref() {
+            if let Some(output) = audio_output.as_mut() {
                 output.clear();
             }
         }

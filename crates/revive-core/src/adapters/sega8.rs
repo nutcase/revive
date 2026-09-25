@@ -373,6 +373,8 @@ macro_rules! impl_common_adapter {
                 Ok(())
             }
 
+            pub fn set_stick(&mut self, _player: u8, _x: i16, _y: i16) {}
+
             pub fn set_button(&mut self, player: u8, button: VirtualButton, pressed: bool) {
                 self.0.set_button(player, button, pressed);
             }
@@ -418,7 +420,11 @@ fn sg1000_button(button: VirtualButton) -> Option<SgButton> {
         | VirtualButton::Z
         | VirtualButton::Mode
         | VirtualButton::L2
-        | VirtualButton::R2 => None,
+        | VirtualButton::R2
+        | VirtualButton::CUp
+        | VirtualButton::CDown
+        | VirtualButton::CLeft
+        | VirtualButton::CRight => None,
     }
 }
 
@@ -440,6 +446,10 @@ fn mastersystem_button(button: VirtualButton) -> Option<SmsButton> {
         | VirtualButton::Z
         | VirtualButton::Mode
         | VirtualButton::L2
-        | VirtualButton::R2 => None,
+        | VirtualButton::R2
+        | VirtualButton::CUp
+        | VirtualButton::CDown
+        | VirtualButton::CLeft
+        | VirtualButton::CRight => None,
     }
 }

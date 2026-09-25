@@ -87,6 +87,8 @@ impl GameBoyAdapter {
         self.emulator.take_audio_samples_i16_into(out);
     }
 
+    pub fn set_stick(&mut self, _player: u8, _x: i16, _y: i16) {}
+
     pub fn set_button(&mut self, player: u8, button: VirtualButton, pressed: bool) {
         if player != 1 {
             return;
@@ -281,6 +283,8 @@ impl GameBoyAdvanceAdapter {
         self.emulator.take_audio_samples_i16_into(out);
     }
 
+    pub fn set_stick(&mut self, _player: u8, _x: i16, _y: i16) {}
+
     pub fn set_button(&mut self, player: u8, button: VirtualButton, pressed: bool) {
         if player != 1 {
             return;
@@ -411,7 +415,11 @@ fn gameboy_button_mask(button: VirtualButton) -> Option<u8> {
         | VirtualButton::Z
         | VirtualButton::Mode
         | VirtualButton::L2
-        | VirtualButton::R2 => None,
+        | VirtualButton::R2
+        | VirtualButton::CUp
+        | VirtualButton::CDown
+        | VirtualButton::CLeft
+        | VirtualButton::CRight => None,
     }
 }
 
@@ -433,7 +441,11 @@ fn gameboy_advance_button_mask(button: VirtualButton) -> Option<u16> {
         | VirtualButton::Z
         | VirtualButton::Mode
         | VirtualButton::L2
-        | VirtualButton::R2 => None,
+        | VirtualButton::R2
+        | VirtualButton::CUp
+        | VirtualButton::CDown
+        | VirtualButton::CLeft
+        | VirtualButton::CRight => None,
     }
 }
 

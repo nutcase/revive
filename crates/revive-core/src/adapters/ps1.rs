@@ -78,6 +78,8 @@ impl Ps1Adapter {
     pub fn drain_audio_i16(&mut self, out: &mut Vec<i16>) {
         self.emulator.drain_audio(out);
     }
+    pub fn set_stick(&mut self, _player: u8, _x: i16, _y: i16) {}
+
     pub fn set_button(&mut self, player: u8, button: VirtualButton, pressed: bool) {
         if !(1..=2).contains(&player) {
             return;
