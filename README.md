@@ -28,6 +28,7 @@ mappers, PPU/video timing, APU/audio timing, and cheat or RAM search tools.
 | Game Boy | `gb`, `gameboy`, `game-boy` | `.gb` |
 | Game Boy Color | `gbc`, `gameboycolor`, `game-boy-color`, `gameboy-color` | `.gbc` |
 | Game Boy Advance | `gba`, `gameboyadvance`, `game-boy-advance`, `gameboy-advance` | `.gba` |
+| Nintendo 64 | `n64`, `nintendo64`, `nintendo-64` | `.z64`, `.n64`, `.v64` |
 | PlayStation | `ps1`, `psx`, `playstation` | `.cue`, `.zip` containing one CUE and its tracks; raw `.bin` requires `--system ps1` |
 
 ## Emulator Development
@@ -64,6 +65,7 @@ crates/cores/mastersystem
 crates/cores/megadrive
 crates/cores/pce
 crates/cores/ps1
+crates/cores/n64
 crates/cores/gameboy/core
 crates/cores/gameboy/gb
 crates/cores/gameboy/gba
@@ -80,7 +82,7 @@ Revive-specific crates are split by responsibility.
 - Rust toolchain
 - C/C++ toolchain
 - CMake
-- GNU make (for the vendored PS1 C core)
+- GNU make (for the vendored PS1 and N64 native cores)
 - Apple Silicon native builds are recommended on macOS
 
 SDL3 is built through the `sdl3` crate's `build-from-source-static` feature, so
@@ -109,6 +111,7 @@ cargo run -- run <rom> --system gb
 cargo run -- run <rom> --system gbc
 cargo run -- run <rom> --system gba
 cargo run -- run <disc.cue> --system ps1
+cargo run --release -- run <rom.z64> --system n64
 ```
 
 To run without audio:
@@ -177,6 +180,20 @@ cheat panel captures only its active tab and swaps reusable current/previous
 buffers. Pausing skips core/audio work and unchanged frame uploads; state keys,
 memory edits and cheats invalidate the cached frame and memory view.
 
+Audio playback initially buffers 50 ms, increasing up to 100 ms if scheduling
+stalls empty the queue. Pausing and recovery also refill before resuming.
+Brief frame overruns retain the original cadence so they do not accumulate into
+an audio deficit. Set `REVIVE_AUDIO_DEBUG=1` to log playback underruns. An opt-in
+real-device diagnostic uses a temporary save directory (run it on its own):
+
+```sh
+REVIVE_AUDIO_TEST_ROM="$PWD/roms/nintendo64/Super Mario 64 (USA).z64" \
+  cargo test --release -p revive-cli local_rom_audio_delivery -- --ignored --nocapture
+```
+
+`REVIVE_AUDIO_TEST_FRAMES` overrides the default 900 frames. Avoid concurrent
+builds during this diagnostic; it plays sound through the default audio device.
+
 ## ROM Detection
 
 Revive detects systems from file extensions.
@@ -190,6 +207,7 @@ Revive detects systems from file extensions.
 - `.gb`: Game Boy
 - `.gbc`: Game Boy Color
 - `.gba`: Game Boy Advance
+- `.z64`, `.n64`, `.v64`: Nintendo 64
 - `.bin`: Mega Drive only when a `SEGA` header is present
 
 If detection fails, pass `--system` explicitly.
@@ -275,6 +293,11 @@ Game Boy Advance:
 - `Return` / `Space`: Start
 - `Backspace` / Shift: Select
 
+Nintendo 64:
+
+- Arrow keys control the analog stick; W / S / A / D control the D-pad.
+- See the [N64 control table](#nintendo-64) for all keyboard and gamepad bindings.
+
 ## Cheat Panel
 
 Press `Tab` to open a right-side cheat panel similar to the SNES frontend. While
@@ -336,6 +359,7 @@ Main region IDs:
 - Game Boy: `wram`, `vram`, `oam`, `hram`, `cart_ram`
 - Game Boy Color: `wram`, `vram`, `oam`, `hram`, `cart_ram`
 - Game Boy Advance: `ewram`, `iwram`, `pram`, `vram`, `oam`
+- Nintendo 64: `rdram` (guest big-endian byte addresses)
 
 Game Boy / Game Boy Color `cart_ram` appears only when the cartridge exposes
 backup RAM.
@@ -360,6 +384,7 @@ states/pce/Adventure Island/slot1.pcst
 states/gb/Tetris/slot1.gbst
 states/gbc/Dragon Warrior Monsters/slot1.gbcst
 states/gba/Example/slot1.gbas
+states/n64/Example/slot1.n64st
 ```
 
 Legacy save-state files are used as load-only fallbacks.
@@ -378,6 +403,7 @@ SRAM and backup RAM are handled according to each core's API.
 - Game Boy / Game Boy Color: `.sav`
 - Game Boy Advance: `.sav`
 - NES: SRAM persistence is handled by the core
+- Nintendo 64: `states/n64/<rom-stem>/cartridge.srm` (cartridge and Controller Pak)
 
 Persistent saves are usually flushed on normal exit. A crash may prevent the
 latest save data from being written.
@@ -391,7 +417,8 @@ frontend that selects the right core for one ROM and presents a common UI.
 
 `revive-core` hides emulator-specific differences behind adapters. The
 `CoreInstance` enum wraps NES, SNES, SG-1000, Master System, Mega Drive, PC
-Engine, Game Boy, and GBA implementations, and exposes only the common
+Engine, Game Boy/Color, GBA, PlayStation, and Nintendo 64 implementations,
+and exposes only the common
 operations to the CLI.
 
 - `load_rom`
@@ -400,6 +427,7 @@ operations to the CLI.
 - `audio_spec`
 - `drain_audio_i16`
 - `set_button`
+- `set_stick` (analog input; unsupported cores ignore it)
 - `memory_regions`
 - `read_memory`
 - `write_memory_byte`
@@ -465,6 +493,7 @@ cargo test -p megadrive-core
 cargo test -p pce-core
 cargo test -p emulator-gb
 cargo test -p emulator-gba
+cargo test -p n64-core
 ```
 
 ## Known Limitations
@@ -532,4 +561,65 @@ audio/video, save states and reopening:
 cargo test -p ps1-core -p revive-core -p revive-cli
 REVIVE_PS1_TEST_ROM="roms/ps1/Momotarou Densetsu (Japan).zip" \
   cargo test -p revive-core --test ps1_local_disc -- --ignored --nocapture
+```
+
+## Nintendo 64
+
+```sh
+cargo run --release -- "roms/nintendo64/Super Mario 64 (USA).z64"
+cargo run --release -- run game.v64 --system n64
+```
+
+N64 uses the bundled Mupen64Plus-Next cached interpreter, CXD4 RSP and
+Angrylion software renderer. No external emulator or BIOS installation is
+required. `.z64`, `.n64`, and `.v64` cartridge dumps are validated and normalized
+by their headers. N64 archives must first be extracted; PS1 CUE ZIP handling is
+unchanged. Output stays 4:3, including resolution changes, with the cartridge's
+NTSC/PAL pacing and stereo audio. Release builds are recommended.
+
+Initial scope: one player, 8 MiB Expansion Pak, Controller Pak and cartridge
+saves. 64DD, Transfer Pak, rumble, online play and high-resolution rendering
+are not exposed.
+
+| N64 control | Keyboard | SDL gamepad |
+| --- | --- | --- |
+| Analog stick | Arrow keys | Left stick |
+| D-pad | W / S / A / D | D-pad |
+| A / B | Z / X | South / West face buttons |
+| Z trigger | Shift | Left trigger |
+| L / R | Q / E | Left / right shoulder |
+| C up / down / left / right | I / K / J / L | Right stick |
+| Start | Enter | Start |
+
+The gamepad connects automatically and can be unplugged/reconnected. Analog
+input has a radial deadzone; keyboard diagonals have a normalized magnitude.
+Focus loss and UI keyboard capture release both buttons and the stick.
+
+Cartridge EEPROM/SRAM/FlashRAM and Controller Pak data share
+`states/n64/<rom-stem>/cartridge.srm`, written atomically every 60 frames when
+changed and on clean exit. Existing saves are loaded at startup; invalid save
+sizes report an error instead of silently replacing the file. State slots use
+`slot<N>.n64st` in the same directory and the existing platform save/load keys.
+States are tied to the ROM contents and include an integrity checksum.
+
+The memory panel exposes `rdram` in N64 guest byte-address order; existing
+1-byte searches and frozen cheats work with
+`cheats/n64/<rom-stem>/cheats.json`. Offsets start at zero, not at the virtual
+CPU address `0x80000000`. GameShark-code import is not implemented.
+
+See [N64 upstream/build/validation notes](crates/cores/n64/UPSTREAM.md) for the
+pinned source, native fixes, build dependencies, and opt-in local-ROM tests.
+
+Validation targets macOS on Apple Silicon with the local Super Mario 64 (USA)
+cartridge. It covers boot, scripted input, video/audio output, RDRAM access,
+state restoration and continued execution, save-file reopening, rejection of
+invalid saves/states, and coexistence with the PS1 core. This is not a full
+playthrough or an all-games compatibility claim. Physical gamepad operation
+and Linux/Windows builds have not been verified. Brief audio gaps can still
+occur during long host scheduling stalls.
+
+```sh
+cargo test -p n64-core -p revive-core -p revive-cli
+REVIVE_N64_TEST_ROM="$PWD/roms/nintendo64/Super Mario 64 (USA).z64" \
+  cargo test --release -p revive-core --test n64_local_rom -- --ignored --nocapture
 ```

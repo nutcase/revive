@@ -1,7 +1,7 @@
 use revive_core::{CoreInstance, SystemKind, VirtualButton};
 use sdl3::keyboard::{KeyboardState, Keycode, Scancode};
 
-const INPUT_BUTTONS: [VirtualButton; 17] = [
+const INPUT_BUTTONS: [VirtualButton; 21] = [
     VirtualButton::Up,
     VirtualButton::Down,
     VirtualButton::Left,
@@ -19,6 +19,10 @@ const INPUT_BUTTONS: [VirtualButton; 17] = [
     VirtualButton::Mode,
     VirtualButton::L2,
     VirtualButton::R2,
+    VirtualButton::CUp,
+    VirtualButton::CDown,
+    VirtualButton::CLeft,
+    VirtualButton::CRight,
 ];
 
 #[derive(Debug, Default)]
@@ -56,6 +60,7 @@ pub(crate) fn sync_keyboard_input(
 }
 
 pub(crate) fn release_keyboard_input(core: &mut CoreInstance) {
+    core.set_stick(1, 0, 0);
     for button in INPUT_BUTTONS {
         core.set_button(1, button, false);
     }
@@ -88,6 +93,7 @@ struct ButtonBinding {
 
 fn bindings_for_system(system: SystemKind) -> &'static [ButtonBinding] {
     match system {
+        SystemKind::Nintendo64 => &N64_BINDINGS,
         SystemKind::PlayStation => &PS1_BINDINGS,
         SystemKind::Nes => &NES_BINDINGS,
         SystemKind::Snes => &SNES_BINDINGS,
@@ -299,6 +305,10 @@ fn button_index(button: VirtualButton) -> usize {
         VirtualButton::Mode => 14,
         VirtualButton::L2 => 15,
         VirtualButton::R2 => 16,
+        VirtualButton::CUp => 17,
+        VirtualButton::CDown => 18,
+        VirtualButton::CLeft => 19,
+        VirtualButton::CRight => 20,
     }
 }
 
@@ -321,6 +331,10 @@ pub(crate) fn button_label(button: VirtualButton) -> &'static str {
         VirtualButton::Mode => "Mode",
         VirtualButton::L2 => "L2",
         VirtualButton::R2 => "R2",
+        VirtualButton::CUp => "C Up",
+        VirtualButton::CDown => "C Down",
+        VirtualButton::CLeft => "C Left",
+        VirtualButton::CRight => "C Right",
     }
 }
 
@@ -413,5 +427,153 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+static N64_BINDINGS: [ButtonBinding; 14] = [
+    binding(VirtualButton::Up, &[Keycode::W], &[Scancode::W]),
+    binding(VirtualButton::Down, &[Keycode::S], &[Scancode::S]),
+    binding(VirtualButton::Left, &[Keycode::A], &[Scancode::A]),
+    binding(VirtualButton::Right, &[Keycode::D], &[Scancode::D]),
+    binding(VirtualButton::A, &[Keycode::Z], &[Scancode::Z]),
+    binding(VirtualButton::B, &[Keycode::X], &[Scancode::X]),
+    binding(
+        VirtualButton::Z,
+        &[Keycode::LShift, Keycode::RShift],
+        &[Scancode::LShift, Scancode::RShift],
+    ),
+    binding(VirtualButton::L, &[Keycode::Q], &[Scancode::Q]),
+    binding(VirtualButton::R, &[Keycode::E], &[Scancode::E]),
+    binding(
+        VirtualButton::Start,
+        &[Keycode::Return],
+        &[Scancode::Return],
+    ),
+    binding(VirtualButton::CUp, &[Keycode::I], &[Scancode::I]),
+    binding(VirtualButton::CDown, &[Keycode::K], &[Scancode::K]),
+    binding(VirtualButton::CLeft, &[Keycode::J], &[Scancode::J]),
+    binding(VirtualButton::CRight, &[Keycode::L], &[Scancode::L]),
+];
+
+pub(crate) struct N64Input {
+    subsystem: sdl3::GamepadSubsystem,
+    pad: Option<sdl3::gamepad::Gamepad>,
+    next_scan: std::time::Instant,
+}
+impl N64Input {
+    pub(crate) fn new(sdl: &sdl3::Sdl) -> Result<Self, sdl3::Error> {
+        Ok(Self {
+            subsystem: sdl.gamepad()?,
+            pad: None,
+            next_scan: std::time::Instant::now(),
+        })
+    }
+    pub(crate) fn sync(
+        &mut self,
+        core: &mut CoreInstance,
+        pump: &sdl3::EventPump,
+        input: &InputState,
+    ) {
+        use sdl3::gamepad::{Axis, Button};
+        if self.pad.as_ref().is_some_and(|p| !p.connected()) {
+            self.pad = None;
+        }
+        if self.pad.is_none() && std::time::Instant::now() >= self.next_scan {
+            self.next_scan = std::time::Instant::now() + std::time::Duration::from_secs(1);
+            if let Ok(ids) = self.subsystem.gamepads() {
+                self.pad = ids.into_iter().find_map(|id| self.subsystem.open(id).ok());
+            }
+        }
+        let keyboard = pump.keyboard_state();
+        let mut stick = keyboard_stick(
+            keyboard.is_scancode_pressed(Scancode::Left),
+            keyboard.is_scancode_pressed(Scancode::Right),
+            keyboard.is_scancode_pressed(Scancode::Up),
+            keyboard.is_scancode_pressed(Scancode::Down),
+        );
+        if let Some(pad) = &self.pad {
+            let x = pad.axis(Axis::LeftX);
+            let y = pad.axis(Axis::LeftY);
+            let analog = deadzone(x, y);
+            if analog != (0, 0) {
+                stick = analog;
+            }
+        }
+        core.set_stick(1, stick.0, stick.1);
+        for button in INPUT_BUTTONS {
+            let gamepad = self.pad.as_ref().is_some_and(|pad| match button {
+                VirtualButton::A => pad.button(Button::South),
+                VirtualButton::B => pad.button(Button::West),
+                VirtualButton::Start => pad.button(Button::Start),
+                VirtualButton::L => pad.button(Button::LeftShoulder),
+                VirtualButton::R => pad.button(Button::RightShoulder),
+                VirtualButton::Z => pad.axis(Axis::TriggerLeft) > 8192,
+                VirtualButton::Up => pad.button(Button::DPadUp),
+                VirtualButton::Down => pad.button(Button::DPadDown),
+                VirtualButton::Left => pad.button(Button::DPadLeft),
+                VirtualButton::Right => pad.button(Button::DPadRight),
+                VirtualButton::CUp => pad.axis(Axis::RightY) < -16384,
+                VirtualButton::CDown => pad.axis(Axis::RightY) > 16384,
+                VirtualButton::CLeft => pad.axis(Axis::RightX) < -16384,
+                VirtualButton::CRight => pad.axis(Axis::RightX) > 16384,
+                _ => false,
+            });
+            core.set_button(
+                1,
+                button,
+                gamepad
+                    || input.is_pressed(button)
+                    || button_pressed(SystemKind::Nintendo64, &keyboard, button),
+            );
+        }
+    }
+}
+fn keyboard_stick(left: bool, right: bool, up: bool, down: bool) -> (i16, i16) {
+    let x = i16::from(right) - i16::from(left);
+    let y = i16::from(down) - i16::from(up);
+    let scale = if x != 0 && y != 0 { 23170 } else { 32767 };
+    (x * scale, y * scale)
+}
+fn deadzone(x: i16, y: i16) -> (i16, i16) {
+    let radius = (f64::from(x).powi(2) + f64::from(y).powi(2)).sqrt();
+    if radius <= 6000.0 {
+        return (0, 0);
+    }
+    let magnitude = ((radius - 6000.0) / (32767.0 - 6000.0)).min(1.0) * 32767.0;
+    (
+        (f64::from(x) / radius * magnitude) as i16,
+        (f64::from(y) / radius * magnitude) as i16,
+    )
+}
+
+#[cfg(test)]
+mod n64_tests {
+    use super::*;
+    #[test]
+    fn keyboard_stick_cancels_opposites_and_limits_diagonals() {
+        assert_eq!(keyboard_stick(true, true, true, true), (0, 0));
+        assert_eq!(keyboard_stick(false, false, true, false), (0, -32767));
+        assert_eq!(keyboard_stick(false, true, true, false), (23170, -23170));
+    }
+    #[test]
+    fn analog_deadzone_preserves_direction_and_saturates() {
+        assert_eq!(deadzone(3000, -3000), (0, 0));
+        assert_eq!(deadzone(0, -32768), (0, -32767));
+        let (x, y) = deadzone(32767, 32767);
+        assert!((x as f64).hypot(y as f64) <= 32767.0);
+    }
+    #[test]
+    fn c_buttons_are_distinct_from_dpad_and_face_buttons() {
+        for (key, button) in [
+            (Keycode::I, VirtualButton::CUp),
+            (Keycode::K, VirtualButton::CDown),
+            (Keycode::J, VirtualButton::CLeft),
+            (Keycode::L, VirtualButton::CRight),
+            (Keycode::Z, VirtualButton::A),
+            (Keycode::X, VirtualButton::B),
+        ] {
+            assert_eq!(keycode_button(SystemKind::Nintendo64, key), Some(button));
+        }
+        assert_eq!(keycode_button(SystemKind::Nintendo64, Keycode::Up), None);
     }
 }

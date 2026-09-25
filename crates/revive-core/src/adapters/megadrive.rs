@@ -78,6 +78,8 @@ impl MegaDriveAdapter {
         self.emulator.drain_audio_samples_into(max_samples, out);
     }
 
+    pub fn set_stick(&mut self, _player: u8, _x: i16, _y: i16) {}
+
     pub fn set_button(&mut self, player: u8, button: VirtualButton, pressed: bool) {
         let Some(button) = md_button(button) else {
             return;
@@ -154,7 +156,11 @@ fn md_button(button: VirtualButton) -> Option<MdButton> {
         | VirtualButton::R
         | VirtualButton::Select
         | VirtualButton::L2
-        | VirtualButton::R2 => None,
+        | VirtualButton::R2
+        | VirtualButton::CUp
+        | VirtualButton::CDown
+        | VirtualButton::CLeft
+        | VirtualButton::CRight => None,
     }
 }
 fn md_display_title(emulator: &megadrive_core::Emulator, path: &Path) -> String {

@@ -8,6 +8,7 @@ members = [
     "crates/cores/nes",
     "crates/cores/pce",
     "crates/cores/ps1",
+    "crates/cores/n64",
     "crates/cores/sega8-common",
     "crates/cores/sg1000",
     "crates/cores/snes",
@@ -34,6 +35,9 @@ opt-level = 3
 opt-level = 3
 
 [profile.dev.package.mastersystem-core]
+opt-level = 3
+
+[profile.dev.package.n64-core]
 opt-level = 3
 
 [profile.dev.package.nes-emulator]

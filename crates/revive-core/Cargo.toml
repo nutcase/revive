@@ -28,3 +28,5 @@ snes-core = { path = "../cores/snes" }
 ps1-core = { path = "../cores/ps1" }
 tempfile = "3"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+n64-core = { path = "../cores/n64" }

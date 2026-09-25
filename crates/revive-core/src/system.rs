@@ -14,6 +14,7 @@ pub enum SystemKind {
     GameBoyColor,
     GameBoyAdvance,
     PlayStation,
+    Nintendo64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -127,7 +128,17 @@ const PLAYSTATION_INFO: SystemInfo = SystemInfo {
     frame_rate_hz: 60.0, // Nominal; the active core supplies the actual NTSC/PAL rate.
 };
 
-pub const ALL_SYSTEMS: [SystemKind; 10] = [
+const NINTENDO64_INFO: SystemInfo = SystemInfo {
+    kind: SystemKind::Nintendo64,
+    label: "Nintendo 64",
+    storage_dir: "n64",
+    state_extension: "n64st",
+    rom_extensions: &["z64", "n64", "v64"],
+    dialog_extensions: &["z64", "n64", "v64"],
+    frame_rate_hz: 60.0, // Active cartridge determines NTSC/PAL rate.
+};
+
+pub const ALL_SYSTEMS: [SystemKind; 11] = [
     SystemKind::Nes,
     SystemKind::Snes,
     SystemKind::Sg1000,
@@ -138,17 +149,19 @@ pub const ALL_SYSTEMS: [SystemKind; 10] = [
     SystemKind::GameBoyColor,
     SystemKind::GameBoyAdvance,
     SystemKind::PlayStation,
+    SystemKind::Nintendo64,
 ];
 
 pub const ROM_EXTENSIONS: &[&str] = &[
     "nes", "sfc", "smc", "sg", "sg1000", "sms", "mk3", "md", "gen", "genesis", "pce", "gb", "gbc",
-    "gba", "bin", "cue", "zip",
+    "gba", "bin", "cue", "zip", "z64", "n64", "v64",
 ];
 
 impl SystemKind {
     pub fn parse(input: &str) -> Option<Self> {
         match input.trim().to_ascii_lowercase().as_str() {
             "auto" => None,
+            "n64" | "nintendo64" | "nintendo-64" => Some(Self::Nintendo64),
             "ps1" | "psx" | "playstation" => Some(Self::PlayStation),
             "nes" | "fc" | "famicom" => Some(Self::Nes),
             "snes" | "sfc" | "super-famicom" | "superfamicom" => Some(Self::Snes),
@@ -180,6 +193,7 @@ impl SystemKind {
             Self::GameBoyColor => &GAME_BOY_COLOR_INFO,
             Self::GameBoyAdvance => &GAME_BOY_ADVANCE_INFO,
             Self::PlayStation => &PLAYSTATION_INFO,
+            Self::Nintendo64 => &NINTENDO64_INFO,
         }
     }
 
@@ -231,6 +245,10 @@ pub enum VirtualButton {
     Mode,
     L2,
     R2,
+    CUp,
+    CDown,
+    CLeft,
+    CRight,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -307,6 +325,19 @@ pub fn detect_system(path: &Path) -> Result<SystemKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_nintendo64_dumps_and_aliases() {
+        for file in ["game.z64", "game.n64", "game.v64", "GAME.Z64"] {
+            assert_eq!(
+                detect_system(Path::new(file)).unwrap(),
+                SystemKind::Nintendo64
+            );
+        }
+        for alias in ["n64", "nintendo64", "Nintendo-64"] {
+            assert_eq!(SystemKind::parse(alias), Some(SystemKind::Nintendo64));
+        }
+    }
 
     #[test]
     fn detects_system_from_standard_extensions() {

@@ -4,6 +4,7 @@ use emulator_gb::GbModel;
 
 use super::gameboy::{GameBoyAdapter, GameBoyAdvanceAdapter};
 use super::megadrive::MegaDriveAdapter;
+use super::n64::N64Adapter;
 use super::nes::NesAdapter;
 use super::pce::PceAdapter;
 use super::ps1::Ps1Adapter;
@@ -21,6 +22,7 @@ pub enum CoreInstance {
     MegaDrive(Box<MegaDriveAdapter>),
     Pce(Box<PceAdapter>),
     PlayStation(Box<Ps1Adapter>),
+    Nintendo64(Box<N64Adapter>),
     GameBoy(Box<GameBoyAdapter>),
     GameBoyAdvance(Box<GameBoyAdvanceAdapter>),
 }
@@ -42,6 +44,7 @@ impl CoreInstance {
 
         let mut core = match system {
             SystemKind::PlayStation => Ps1Adapter::load(path).map(Box::new).map(Self::PlayStation),
+            SystemKind::Nintendo64 => N64Adapter::load(path).map(Box::new).map(Self::Nintendo64),
             SystemKind::Nes => NesAdapter::load(path).map(Box::new).map(Self::Nes),
             SystemKind::Snes => SnesAdapter::load_with_audio(path, audio_enabled)
                 .map(|adapter| Self::Snes(Box::new(adapter))),
@@ -71,6 +74,7 @@ impl CoreInstance {
             Self::MegaDrive(adapter) => adapter.set_audio_output_enabled(audio_enabled),
             Self::Pce(adapter) => adapter.set_audio_output_enabled(audio_enabled),
             Self::PlayStation(adapter) => adapter.set_audio_output_enabled(audio_enabled),
+            Self::Nintendo64(adapter) => adapter.set_audio_output_enabled(audio_enabled),
             Self::GameBoy(adapter) => adapter.set_audio_output_enabled(audio_enabled),
             Self::GameBoyAdvance(adapter) => adapter.set_audio_output_enabled(audio_enabled),
             Self::Snes(_) => {} // configured during construction
@@ -87,6 +91,7 @@ impl CoreInstance {
             Self::MegaDrive(_) => SystemKind::MegaDrive,
             Self::Pce(_) => SystemKind::Pce,
             Self::PlayStation(_) => SystemKind::PlayStation,
+            Self::Nintendo64(_) => SystemKind::Nintendo64,
             Self::GameBoy(adapter) => adapter.system(),
             Self::GameBoyAdvance(_) => SystemKind::GameBoyAdvance,
         }
@@ -95,6 +100,7 @@ impl CoreInstance {
     pub fn frame_rate_hz(&self) -> f64 {
         match self {
             Self::PlayStation(adapter) => adapter.frame_rate_hz(),
+            Self::Nintendo64(adapter) => adapter.frame_rate_hz(),
             _ => self.system().frame_rate_hz(),
         }
     }
@@ -108,6 +114,7 @@ impl CoreInstance {
             Self::MegaDrive(adapter) => adapter.title(),
             Self::Pce(adapter) => adapter.title(),
             Self::PlayStation(adapter) => adapter.title(),
+            Self::Nintendo64(adapter) => adapter.title(),
             Self::GameBoy(adapter) => adapter.title(),
             Self::GameBoyAdvance(adapter) => adapter.title(),
         }
@@ -122,6 +129,7 @@ impl CoreInstance {
             Self::MegaDrive(adapter) => adapter.step_frame(),
             Self::Pce(adapter) => adapter.step_frame(),
             Self::PlayStation(adapter) => adapter.step_frame(),
+            Self::Nintendo64(adapter) => adapter.step_frame(),
             Self::GameBoy(adapter) => adapter.step_frame(),
             Self::GameBoyAdvance(adapter) => adapter.step_frame(),
         }
@@ -136,6 +144,7 @@ impl CoreInstance {
             Self::MegaDrive(adapter) => adapter.frame(),
             Self::Pce(adapter) => adapter.frame(),
             Self::PlayStation(adapter) => adapter.frame(),
+            Self::Nintendo64(adapter) => adapter.frame(),
             Self::GameBoy(adapter) => adapter.frame(),
             Self::GameBoyAdvance(adapter) => adapter.frame(),
         }
@@ -150,6 +159,7 @@ impl CoreInstance {
             Self::MegaDrive(adapter) => adapter.audio_spec(),
             Self::Pce(adapter) => adapter.audio_spec(),
             Self::PlayStation(adapter) => adapter.audio_spec(),
+            Self::Nintendo64(adapter) => adapter.audio_spec(),
             Self::GameBoy(adapter) => adapter.audio_spec(),
             Self::GameBoyAdvance(adapter) => adapter.audio_spec(),
         }
@@ -164,6 +174,7 @@ impl CoreInstance {
             Self::MegaDrive(adapter) => adapter.configure_audio_output(sample_rate_hz),
             Self::Pce(adapter) => adapter.configure_audio_output(sample_rate_hz),
             Self::PlayStation(adapter) => adapter.configure_audio_output(sample_rate_hz),
+            Self::Nintendo64(adapter) => adapter.configure_audio_output(sample_rate_hz),
             Self::GameBoy(adapter) => adapter.configure_audio_output(sample_rate_hz),
             Self::GameBoyAdvance(adapter) => adapter.configure_audio_output(sample_rate_hz),
         }
@@ -178,6 +189,7 @@ impl CoreInstance {
             Self::MegaDrive(adapter) => adapter.drain_audio_i16(out),
             Self::Pce(adapter) => adapter.drain_audio_i16(out),
             Self::PlayStation(adapter) => adapter.drain_audio_i16(out),
+            Self::Nintendo64(adapter) => adapter.drain_audio_i16(out),
             Self::GameBoy(adapter) => adapter.drain_audio_i16(out),
             Self::GameBoyAdvance(adapter) => adapter.drain_audio_i16(out),
         }
@@ -192,8 +204,24 @@ impl CoreInstance {
             Self::MegaDrive(adapter) => adapter.set_button(player, button, pressed),
             Self::Pce(adapter) => adapter.set_button(player, button, pressed),
             Self::PlayStation(adapter) => adapter.set_button(player, button, pressed),
+            Self::Nintendo64(adapter) => adapter.set_button(player, button, pressed),
             Self::GameBoy(adapter) => adapter.set_button(player, button, pressed),
             Self::GameBoyAdvance(adapter) => adapter.set_button(player, button, pressed),
+        }
+    }
+
+    pub fn set_stick(&mut self, player: u8, x: i16, y: i16) {
+        match self {
+            Self::Nes(adapter) => adapter.set_stick(player, x, y),
+            Self::Snes(adapter) => adapter.set_stick(player, x, y),
+            Self::Sg1000(adapter) => adapter.set_stick(player, x, y),
+            Self::MasterSystem(adapter) => adapter.set_stick(player, x, y),
+            Self::MegaDrive(adapter) => adapter.set_stick(player, x, y),
+            Self::Pce(adapter) => adapter.set_stick(player, x, y),
+            Self::PlayStation(adapter) => adapter.set_stick(player, x, y),
+            Self::Nintendo64(adapter) => adapter.set_stick(player, x, y),
+            Self::GameBoy(adapter) => adapter.set_stick(player, x, y),
+            Self::GameBoyAdvance(adapter) => adapter.set_stick(player, x, y),
         }
     }
 
@@ -206,6 +234,7 @@ impl CoreInstance {
             Self::MegaDrive(adapter) => adapter.memory_regions(),
             Self::Pce(adapter) => adapter.memory_regions(),
             Self::PlayStation(adapter) => adapter.memory_regions(),
+            Self::Nintendo64(adapter) => adapter.memory_regions(),
             Self::GameBoy(adapter) => adapter.memory_regions(),
             Self::GameBoyAdvance(adapter) => adapter.memory_regions(),
         }
@@ -220,6 +249,7 @@ impl CoreInstance {
             Self::MegaDrive(adapter) => adapter.read_memory(region_id),
             Self::Pce(adapter) => adapter.read_memory(region_id),
             Self::PlayStation(adapter) => adapter.read_memory(region_id),
+            Self::Nintendo64(adapter) => adapter.read_memory(region_id),
             Self::GameBoy(adapter) => adapter.read_memory(region_id),
             Self::GameBoyAdvance(adapter) => adapter.read_memory(region_id),
         }
@@ -234,6 +264,7 @@ impl CoreInstance {
             Self::MegaDrive(adapter) => adapter.write_memory_byte(region_id, offset, value),
             Self::Pce(adapter) => adapter.write_memory_byte(region_id, offset, value),
             Self::PlayStation(adapter) => adapter.write_memory_byte(region_id, offset, value),
+            Self::Nintendo64(adapter) => adapter.write_memory_byte(region_id, offset, value),
             Self::GameBoy(adapter) => adapter.write_memory_byte(region_id, offset, value),
             Self::GameBoyAdvance(adapter) => adapter.write_memory_byte(region_id, offset, value),
         }
@@ -248,6 +279,7 @@ impl CoreInstance {
             Self::MegaDrive(adapter) => adapter.save_state_to_slot(slot),
             Self::Pce(adapter) => adapter.save_state_to_slot(slot),
             Self::PlayStation(adapter) => adapter.save_state_to_slot(slot),
+            Self::Nintendo64(adapter) => adapter.save_state_to_slot(slot),
             Self::GameBoy(adapter) => adapter.save_state_to_slot(slot),
             Self::GameBoyAdvance(adapter) => adapter.save_state_to_slot(slot),
         }
@@ -262,6 +294,7 @@ impl CoreInstance {
             Self::MegaDrive(adapter) => adapter.load_state_from_slot(slot),
             Self::Pce(adapter) => adapter.load_state_from_slot(slot),
             Self::PlayStation(adapter) => adapter.load_state_from_slot(slot),
+            Self::Nintendo64(adapter) => adapter.load_state_from_slot(slot),
             Self::GameBoy(adapter) => adapter.load_state_from_slot(slot),
             Self::GameBoyAdvance(adapter) => adapter.load_state_from_slot(slot),
         }
@@ -276,6 +309,7 @@ impl CoreInstance {
             Self::MegaDrive(adapter) => adapter.flush_persistent_save(),
             Self::Pce(adapter) => adapter.flush_persistent_save(),
             Self::PlayStation(adapter) => adapter.flush_persistent_save(),
+            Self::Nintendo64(adapter) => adapter.flush_persistent_save(),
             Self::GameBoy(adapter) => adapter.flush_persistent_save(),
             Self::GameBoyAdvance(adapter) => adapter.flush_persistent_save(),
         }

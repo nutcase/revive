@@ -72,6 +72,12 @@ pub(crate) fn print_session_banner(core: &CoreInstance, rom_path: &Path, cheat_p
         println!("PS1         : HLE BIOS, digital pad; Z=Cross X=Circle A=Square S=Triangle");
         println!("Shoulders   : Q=L1 W=R1 E=L2 R=R2");
     }
+    if core.system() == SystemKind::Nintendo64 {
+        println!(
+            "N64         : arrows=stick WASD=D-pad Z=A X=B Shift=Z Q=L E=R IJKL=C Enter=Start"
+        );
+        println!("Gamepad     : left stick, South=A West=B LT=Z shoulders=L/R right stick=C");
+    }
     println!("Cheat panel : Tab toggle");
 }
 

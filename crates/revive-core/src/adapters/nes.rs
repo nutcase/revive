@@ -85,6 +85,8 @@ impl NesAdapter {
         }
     }
 
+    pub fn set_stick(&mut self, _player: u8, _x: i16, _y: i16) {}
+
     pub fn set_button(&mut self, player: u8, button: VirtualButton, pressed: bool) {
         let Some(mask) = nes_button_mask(button) else {
             return;

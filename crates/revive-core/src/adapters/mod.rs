@@ -16,3 +16,6 @@ pub use pce::PceAdapter;
 pub use ps1::Ps1Adapter;
 pub use sega8::{MasterSystemAdapter, Sg1000Adapter};
 pub use snes::SnesAdapter;
+
+mod n64;
+pub use n64::N64Adapter;
