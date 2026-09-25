@@ -65,6 +65,7 @@ crates/cores/mastersystem
 crates/cores/megadrive
 crates/cores/pce
 crates/cores/ps1
+crates/cores/n64
 crates/cores/gameboy/core
 crates/cores/gameboy/gb
 crates/cores/gameboy/gba
@@ -81,7 +82,7 @@ Revive-specific crates are split by responsibility.
 - Rust toolchain
 - C/C++ toolchain
 - CMake
-- GNU make (for the vendored PS1 C core)
+- GNU make (for the vendored PS1 and N64 native cores)
 - Apple Silicon native builds are recommended on macOS
 
 SDL3 is built through the `sdl3` crate's `build-from-source-static` feature, so
@@ -110,6 +111,7 @@ cargo run -- run <rom> --system gb
 cargo run -- run <rom> --system gbc
 cargo run -- run <rom> --system gba
 cargo run -- run <disc.cue> --system ps1
+cargo run --release -- run <rom.z64> --system n64
 ```
 
 To run without audio:
@@ -291,6 +293,11 @@ Game Boy Advance:
 - `Return` / `Space`: Start
 - `Backspace` / Shift: Select
 
+Nintendo 64:
+
+- Arrow keys control the analog stick; W / S / A / D control the D-pad.
+- See the [N64 control table](#nintendo-64) for all keyboard and gamepad bindings.
+
 ## Cheat Panel
 
 Press `Tab` to open a right-side cheat panel similar to the SNES frontend. While
@@ -352,6 +359,7 @@ Main region IDs:
 - Game Boy: `wram`, `vram`, `oam`, `hram`, `cart_ram`
 - Game Boy Color: `wram`, `vram`, `oam`, `hram`, `cart_ram`
 - Game Boy Advance: `ewram`, `iwram`, `pram`, `vram`, `oam`
+- Nintendo 64: `rdram` (guest big-endian byte addresses)
 
 Game Boy / Game Boy Color `cart_ram` appears only when the cartridge exposes
 backup RAM.
@@ -409,7 +417,8 @@ frontend that selects the right core for one ROM and presents a common UI.
 
 `revive-core` hides emulator-specific differences behind adapters. The
 `CoreInstance` enum wraps NES, SNES, SG-1000, Master System, Mega Drive, PC
-Engine, Game Boy, and GBA implementations, and exposes only the common
+Engine, Game Boy/Color, GBA, PlayStation, and Nintendo 64 implementations,
+and exposes only the common
 operations to the CLI.
 
 - `load_rom`
@@ -418,6 +427,7 @@ operations to the CLI.
 - `audio_spec`
 - `drain_audio_i16`
 - `set_button`
+- `set_stick` (analog input; unsupported cores ignore it)
 - `memory_regions`
 - `read_memory`
 - `write_memory_byte`
@@ -483,6 +493,7 @@ cargo test -p megadrive-core
 cargo test -p pce-core
 cargo test -p emulator-gb
 cargo test -p emulator-gba
+cargo test -p n64-core
 ```
 
 ## Known Limitations
@@ -598,3 +609,17 @@ CPU address `0x80000000`. GameShark-code import is not implemented.
 
 See [N64 upstream/build/validation notes](crates/cores/n64/UPSTREAM.md) for the
 pinned source, native fixes, build dependencies, and opt-in local-ROM tests.
+
+Validation targets macOS on Apple Silicon with the local Super Mario 64 (USA)
+cartridge. It covers boot, scripted input, video/audio output, RDRAM access,
+state restoration and continued execution, save-file reopening, rejection of
+invalid saves/states, and coexistence with the PS1 core. This is not a full
+playthrough or an all-games compatibility claim. Physical gamepad operation
+and Linux/Windows builds have not been verified. Brief audio gaps can still
+occur during long host scheduling stalls.
+
+```sh
+cargo test -p n64-core -p revive-core -p revive-cli
+REVIVE_N64_TEST_ROM="$PWD/roms/nintendo64/Super Mario 64 (USA).z64" \
+  cargo test --release -p revive-core --test n64_local_rom -- --ignored --nocapture
+```
